@@ -1,0 +1,19 @@
+Name: auditlog-api
+Host: 0.0.0.0
+Port: 28540
+
+MySQLConf:
+  Enable: true
+  User: root
+  Password: j3391111
+  Host: 192.168.126.100
+  Port: 3306
+  Database: auditlog
+  CharSet: utf8
+  ParseTime: true
+  TimeZOne: Local
+  AutoMigrate: true
+  SingularTable: true
+  MaxOpenConns: 100
+  MaxIdleConns: 5
+  ConnMaxLifetime: 600
