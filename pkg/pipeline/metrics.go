@@ -12,6 +12,12 @@ type Metrics struct {
 	ExportCounter  *prometheus.CounterVec
 	DiskUsage      *prometheus.GaugeVec
 	ExportLatency  *prometheus.HistogramVec
+
+	// 新增状态相关指标
+	StateTransitions *prometheus.CounterVec
+	RecoveryAttempts *prometheus.CounterVec
+	RecoveryErrors   *prometheus.CounterVec
+	RecoveredItems   *prometheus.CounterVec
 }
 
 func NewMetrics(namespace string) *Metrics {
@@ -47,6 +53,31 @@ func NewMetrics(namespace string) *Metrics {
 			Help:      "Export operation latency in seconds",
 			Buckets:   prometheus.DefBuckets,
 		}, []string{"exporter"}),
+
+		// 新增状态相关指标
+		StateTransitions: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Name:      "state_transitions_total",
+				Help:      "Number of pipeline state transitions",
+			},
+			[]string{"pipeline", "transition"},
+		),
+		RecoveryAttempts: promauto.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "recovery_attempts_total",
+			Help:      "Number of recovery attempts from local storage",
+		}, []string{"pipeline"}),
+		RecoveryErrors: promauto.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "recovery_errors_total",
+			Help:      "Number of errors during recovery from local storage",
+		}, []string{"pipeline"}),
+		RecoveredItems: promauto.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "recovered_items_total",
+			Help:      "Number of items successfully recovered from local storage",
+		}, []string{"pipeline"}),
 	}
 
 	return m

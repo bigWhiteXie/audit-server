@@ -5,58 +5,58 @@ import (
 )
 
 var (
-	exporterRegistry  = make(map[string]func(config map[string]any) Exporter[any])
-	filterRegistry    = make(map[string]func(config map[string]any) Filter[any])
-	lifecycleRegistry = make(map[string]func(config map[string]any) LifecycleHook[any])
-	mutex             sync.RWMutex
+	exporterFactoryRegistry  = make(map[string]func(config map[string]any) Exporter)
+	filterFactoryRegistry    = make(map[string]func(config map[string]any) Filter)
+	lifecycleFactoryRegistry = make(map[string]func(config map[string]any) LifecycleHook)
+	mutex                    sync.RWMutex
 )
 
 // RegisterExporter 注册Exporter插件工厂
-func RegisterExporter(name string, factory func(config map[string]any) Exporter[any]) {
+func RegisterExporterFactory(name string, factory func(config map[string]any) Exporter) {
 	mutex.Lock()
 	defer mutex.Unlock()
-	exporterRegistry[name] = factory
+	exporterFactoryRegistry[name] = factory
 }
 
 // GetExporter 根据名称和配置获取Exporter实例
-func GetExporter(name string, config map[string]any) Exporter[any] {
+func GetExporter(name string, config map[string]any) Exporter {
 	mutex.RLock()
 	defer mutex.RUnlock()
-	if factory, ok := exporterRegistry[name]; ok {
+	if factory, ok := exporterFactoryRegistry[name]; ok {
 		return factory(config)
 	}
 	return nil
 }
 
 // RegisterFilter 注册Filter插件工厂
-func RegisterFilter(name string, factory func(config map[string]any) Filter[any]) {
+func RegisterFilterFactory(name string, factory func(config map[string]any) Filter) {
 	mutex.Lock()
 	defer mutex.Unlock()
-	filterRegistry[name] = factory
+	filterFactoryRegistry[name] = factory
 }
 
 // GetFilter 根据名称和配置获取Filter实例
-func GetFilter(name string, config map[string]any) Filter[any] {
+func GetFilter(name string, config map[string]any) Filter {
 	mutex.RLock()
 	defer mutex.RUnlock()
-	if factory, ok := filterRegistry[name]; ok {
+	if factory, ok := filterFactoryRegistry[name]; ok {
 		return factory(config)
 	}
 	return nil
 }
 
 // RegisterLifecycle 注册Lifecycle插件工厂
-func RegisterLifecycle(name string, factory func(config map[string]any) LifecycleHook[any]) {
+func RegisterLifecycleFactory(name string, factory func(config map[string]any) LifecycleHook) {
 	mutex.Lock()
 	defer mutex.Unlock()
-	lifecycleRegistry[name] = factory
+	lifecycleFactoryRegistry[name] = factory
 }
 
 // GetLifecycle 根据名称和配置获取Lifecycle实例
-func GetLifecycle(name string, config map[string]any) LifecycleHook[any] {
+func GetLifecycle(name string, config map[string]any) LifecycleHook {
 	mutex.RLock()
 	defer mutex.RUnlock()
-	if factory, ok := lifecycleRegistry[name]; ok {
+	if factory, ok := lifecycleFactoryRegistry[name]; ok {
 		return factory(config)
 	}
 	return nil

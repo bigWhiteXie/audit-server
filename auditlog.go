@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"codexie.com/auditlog/internal/config"
-	"codexie.com/auditlog/internal/db"
 	"codexie.com/auditlog/internal/handler"
 	"codexie.com/auditlog/internal/svc"
 
@@ -22,7 +21,6 @@ func main() {
 	conf.MustLoad(*configFile, &c)
 
 	// =============初始化db=============
-	db.InitGormDB(c.MySQLConf)
 
 	server := rest.MustNewServer(c.RestConf)
 	defer server.Stop()

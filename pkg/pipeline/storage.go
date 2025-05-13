@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 const (
@@ -18,37 +21,36 @@ const (
 	maxBufferLimit = 10 * 1024 * 1024  // 10MB
 )
 
-type ExportErrData[T any] struct {
-	Name string `json:"name"`
-	Data *T     `json:"data"`
+type ExportErrData struct {
+	Name   string        `json:"name"`
+	Data   []interface{} `json:"data"`
+	Finish bool
 }
 
 // LocalStorage 本地存储，支持泛型
-type LocalStorage[T any] struct {
-	mu          sync.Mutex
-	storageDir  string
-	batchSize   int
-	currentFile *os.File
-	currentSize int64
+type LocalStorage struct {
+	mu             sync.Mutex
+	storageDir     string
+	batchSize      int
+	currentFile    *os.File
+	currentSize    int64
+	recoveringFile string
 }
 
 // NewLocalStorage 创建新的本地存储
-func NewLocalStorage[T any](storageDir string, batchSize int) *LocalStorage[T] {
-	return &LocalStorage[T]{
+func NewLocalStorage(storageDir string, batchSize int) *LocalStorage {
+	s := &LocalStorage{
 		storageDir: storageDir,
 		batchSize:  batchSize,
 	}
+
+	return s
 }
 
 // Save 保存数据到本地文件
-func (s *LocalStorage[T]) Save(name string, batch []T) error {
+func (s *LocalStorage) Save(name string, batch []interface{}) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	// 检查磁盘空间
-	if s.isDiskFull() {
-		return ErrDiskFull
-	}
 
 	if s.currentFile == nil {
 		if err := s.rotateFile(); err != nil {
@@ -56,79 +58,94 @@ func (s *LocalStorage[T]) Save(name string, batch []T) error {
 		}
 	}
 
-	errData := make([]ExportErrData[T], len(batch))
-	for i, data := range batch {
-		errData[i] = ExportErrData[T]{
+	// 检查磁盘空间
+	if s.isDiskFull() {
+		return ErrDiskFull
+	}
+
+	//分批写入磁盘
+	for index := 0; index < len(batch); index += s.batchSize {
+		len := math.Min(float64(s.batchSize), float64(len(batch)-index))
+		errData := ExportErrData{
 			Name: name,
-			Data: &data,
+			Data: batch[index : index+int(len)],
+		}
+
+		// 序列化数据并写入
+		data, err := json.Marshal(errData)
+		if err != nil {
+			return err
+		}
+
+		data = append(data, '\n')
+		n, err := s.currentFile.Write(data)
+		if err != nil {
+			return ErrFileWriteFailed
+		}
+		s.currentSize += int64(n)
+
+		if s.currentSize > maxFileSize {
+			s.rotateFile()
 		}
 	}
 
-	// 序列化数据并写入
-	data, err := json.Marshal(errData)
-	if err != nil {
-		return err
-	}
-
-	data = append(data, '\n')
-	n, err := s.currentFile.Write(data)
-	if err != nil {
-		return ErrFileWriteFailed
-	}
-
-	s.currentSize += int64(n)
-
-	if s.currentSize > maxFileSize {
-		return s.rotateFile()
-	}
 	return nil
 }
 
 // Recover 从本地文件恢复数据，通过channel异步返回
-func (s *LocalStorage[T]) Recover() (<-chan []ExportErrData[T], error) {
-	dataCh := make(chan []ExportErrData[T])
-	errCh := make(chan error, 1)
-
-	defer close(dataCh)
-	defer close(errCh)
+func (s *LocalStorage) Recover() (<-chan ExportErrData, error) {
+	dataCh := make(chan ExportErrData)
 
 	// 获取所有备份文件
 	files, err := filepath.Glob(filepath.Join(s.storageDir, "pipeline-*.log"))
 	if err != nil {
+		close(dataCh)
 		return dataCh, fmt.Errorf("failed to list backup files: %w", err)
 	}
 
 	// 按文件名排序，确保按时间顺序处理
 	sort.Strings(files)
 
-	for _, file := range files {
-		if err := s.recoverFile(file, dataCh); err != nil {
-			return dataCh, fmt.Errorf("failed to recover file %s: %w", file, err)
-		}
+	// 启动goroutine异步读取数据
+	go func() {
+		defer close(dataCh)
 
-		// 恢复完成后删除文件
-		if err := os.Remove(file); err != nil {
-			errCh <- fmt.Errorf("failed to remove processed file %s: %w", file, err)
+		for _, file := range files {
+			if err := s.recoverFile(file, dataCh); err != nil {
+				// 打印错误日志并继续处理下一个文件
+				logx.Errorf("failed to recover file %s: %v", file, err)
+				continue
+			}
+			dataCh <- ExportErrData{
+				Name:   file,
+				Finish: true,
+			}
 		}
-	}
+	}()
 
 	return dataCh, nil
 }
 
+func (s *LocalStorage) RemoveFile(filePath string) error {
+	return os.Remove(filePath)
+}
+
 // recoverFile 从单个文件恢复数据
-func (s *LocalStorage[T]) recoverFile(filePath string, dataCh chan<- []ExportErrData[T]) error {
+func (s *LocalStorage) recoverFile(filePath string, dataCh chan<- ExportErrData) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-
+	s.recoveringFile = filePath
 	scanner := bufio.NewScanner(file)
+
 	// 增加缓冲区大小，处理大行
 	maxCapacity := s.batchSize * 1024
 	if maxCapacity > maxBufferLimit {
 		maxCapacity = maxBufferLimit
 	}
+
 	buf := make([]byte, maxCapacity)
 	scanner.Buffer(buf, maxCapacity)
 
@@ -138,13 +155,13 @@ func (s *LocalStorage[T]) recoverFile(filePath string, dataCh chan<- []ExportErr
 			continue
 		}
 
-		var batch []ExportErrData[T]
-		if err := json.Unmarshal(line, &batch); err != nil {
+		var data ExportErrData
+		if err := json.Unmarshal(line, &data); err != nil {
 			return fmt.Errorf("failed to unmarshal data: %w", err)
 		}
 
-		// 发送恢复的数据批次
-		dataCh <- batch
+		// 发送恢复的数据批次，如果channel已关闭则退出
+		dataCh <- data
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -154,13 +171,13 @@ func (s *LocalStorage[T]) recoverFile(filePath string, dataCh chan<- []ExportErr
 	return nil
 }
 
-func (s *LocalStorage[T]) rotateFile() error {
+func (s *LocalStorage) rotateFile() error {
 	if s.currentFile != nil {
 		s.currentFile.Close()
 	}
 
 	// 确保目录存在
-	if err := os.MkdirAll(s.storageDir, 0755); err != nil {
+	if err := os.MkdirAll(s.storageDir, 0777); err != nil {
 		return err
 	}
 
@@ -177,7 +194,7 @@ func (s *LocalStorage[T]) rotateFile() error {
 }
 
 // Close 关闭存储
-func (s *LocalStorage[T]) Close() error {
+func (s *LocalStorage) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

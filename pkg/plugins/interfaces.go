@@ -2,6 +2,8 @@ package plugins
 
 import (
 	"context"
+
+	"gorm.io/gorm"
 )
 
 // Plugin 所有插件的基础接口
@@ -10,20 +12,26 @@ type Plugin interface {
 }
 
 // Exporter 数据导出插件接口，支持泛型
-type Exporter[T any] interface {
+type Exporter interface {
 	Plugin
-	Export(ctx context.Context, data []T) error
+	Export(ctx context.Context, data []interface{}) error
 }
 
 // Filter 数据过滤插件接口，支持泛型
-type Filter[T any] interface {
+type Filter interface {
 	Plugin
-	Filter(data T) bool
+	Filter(data interface{}) bool
 }
 
 // LifecycleHook 生命周期钩子插件接口，支持泛型
-type LifecycleHook[T any] interface {
+type LifecycleHook interface {
 	Plugin
-	BeforeExport(ctx context.Context, batch []T) context.Context
-	OnError(ctx context.Context, err error, batch []T)
+	BeforeExport(ctx context.Context, batch []interface{}) context.Context
+	OnError(ctx context.Context, err error, batch []interface{})
+}
+
+type Entity interface {
+	Name() string
+	TableName() string
+	SaveBatch(ctx context.Context, db *gorm.DB, data []Entity) error
 }

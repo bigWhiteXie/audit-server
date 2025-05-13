@@ -2,95 +2,186 @@ package pipeline
 
 import (
 	"context"
+	"path"
 	"sync"
 	"time"
 
+	"codexie.com/auditlog/internal/config"
 	"codexie.com/auditlog/pkg/plugins"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
-// 核心接口定义
-type Plugin interface {
-	Name() string
-}
-
-type Exporter interface {
-	Plugin
-	Export(ctx context.Context, data []byte) error
-}
-
-type Filter interface {
-	Plugin
-	Filter(data any) (any, error)
-}
-
-// 生命周期钩子
-type LifecycleHook interface {
-	Plugin
-	BeforeExport(ctx context.Context, batch []any) context.Context
-	OnError(ctx context.Context, err error, batch []any)
-}
-
 // 管道核心结构
-type Pipeline[T any] struct {
-	config  Config
-	queue   chan T
+type Pipeline struct {
+	config  config.PiplineConfig
+	queue   chan interface{}
 	plugins struct {
-		exporter   map[string]plugins.Exporter[T]
-		filters    []plugins.Filter[T]
-		lifecycles []plugins.LifecycleHook[T]
+		exporter   map[string]plugins.Exporter
+		filters    []plugins.Filter
+		lifecycles []plugins.LifecycleHook
 	}
+	blockData  []interface{}
 	state      *State
-	localStore *LocalStorage[T]
+	localStore *LocalStorage
 	metrics    *Metrics
 	wg         sync.WaitGroup
 	ctx        context.Context
 	cancel     context.CancelFunc
+	started    bool
+	mu         sync.RWMutex
 }
 
-type Config struct {
-	Name         string
-	BatchSize    int
-	BatchTimeout time.Duration
-	StorageDir   string
-}
-
-func New[T any](cfg Config) *Pipeline[T] {
+func New(cfg config.PiplineConfig) *Pipeline {
+	cfg.SetDefaults()
 	ctx, cancel := context.WithCancel(context.Background())
 
-	p := &Pipeline[T]{
-		config: cfg,
-		queue:  make(chan T, cfg.BatchSize),
-		state:  NewState(),
-		ctx:    ctx,
-		cancel: cancel,
+	p := &Pipeline{
+		config:    cfg,
+		queue:     make(chan interface{}, cfg.BatchSize),
+		state:     NewState(),
+		ctx:       ctx,
+		cancel:    cancel,
+		blockData: make([]interface{}, 0),
+		plugins: struct {
+			exporter   map[string]plugins.Exporter
+			filters    []plugins.Filter
+			lifecycles []plugins.LifecycleHook
+		}{
+			exporter:   make(map[string]plugins.Exporter),
+			filters:    make([]plugins.Filter, 0),
+			lifecycles: make([]plugins.LifecycleHook, 0),
+		},
 	}
 
 	// 初始化本地存储
-	p.localStore = NewLocalStorage[T](cfg.StorageDir, cfg.BatchSize)
+	p.localStore = NewLocalStorage(path.Join(cfg.StorageDir, cfg.Name), cfg.BatchSize)
 
 	// 初始化指标
 	p.metrics = NewMetrics(cfg.Name)
 
 	// 注册默认生命周期钩子
-	p.RegisterLifecycleHook(&NoopLifecycleHook[T]{})
+	p.RegisterLifecycleHook(&NoopLifecycleHook{})
 
-	// 启动处理器
+	return p
+}
+
+// Start 启动管道处理
+func (p *Pipeline) Start() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.started {
+		return nil
+	}
+
+	// 启动主处理器
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
 		p.processor()
 	}()
 
-	// 启动故障恢复，检测目录中文件是否有残留日志，有的话尝试导出
+	// 启动恢复状态监控
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		p.recoveryMonitor()
+	}()
 
-	return p
+	p.started = true
+	return nil
 }
 
-func (p *Pipeline[T]) Push(data T) error {
+// 恢复监控：尝试读取磁盘中的异常数据进行导出
+func (p *Pipeline) recoveryMonitor() {
+	ticker := time.NewTicker(p.config.RecoveryInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case <-ticker.C:
+			switch p.state.GetStatus() {
+			case StatusRecovering:
+				p.tryRecoverFromDisk()
+			case StatusBlocked:
+				if !p.localStore.isDiskFull() {
+					if err := p.localStore.Save(p.config.Name, p.blockData); err != nil {
+						p.metrics.RecoveryErrors.WithLabelValues(p.config.Name).Inc()
+						continue
+					}
+					p.blockData = p.blockData[:0]
+					p.state.EnterRecovering()
+					p.metrics.StateTransitions.WithLabelValues(p.config.Name, "blocked_to_normal").Inc()
+				}
+			}
+		}
+	}
+}
+
+// 尝试从磁盘恢复数据
+func (p *Pipeline) tryRecoverFromDisk() {
+	p.metrics.RecoveryAttempts.WithLabelValues(p.config.Name).Inc()
+
+	// 获取恢复数据通道
+	dataCh, err := p.localStore.Recover()
+	if err != nil {
+		p.metrics.RecoveryErrors.WithLabelValues(p.config.Name).Inc()
+		return
+	}
+
+	// 处理恢复的数据
+	successCount := 0
+	errorCount := 0
+	exportSuccess := true
+	for batch := range dataCh {
+		// 尝试导出恢复的数据
+		ctx := context.Background()
+		// 单个文件读取结束
+		if batch.Finish {
+			if !exportSuccess {
+				exportSuccess = true
+				continue
+			}
+			go func() {
+				// 导出成功则删除异常日志
+				if err := p.localStore.RemoveFile(batch.Name); err != nil {
+					logx.Errorf("failed to remove data: %v", err)
+				}
+			}()
+			continue
+		}
+		exporter := p.plugins.exporter[batch.Name]
+		if err := exporter.Export(ctx, batch.Data); err != nil {
+			exportSuccess = false
+			errorCount++
+			p.metrics.RecoveryErrors.WithLabelValues(p.config.Name).Inc()
+			logx.Errorf("failed to export data: %v", err)
+			continue
+		}
+
+		successCount += len(batch.Data)
+	}
+
+	p.metrics.RecoveredItems.WithLabelValues(p.config.Name).Add(float64(successCount))
+
+	// 如果成功恢复了数据，切换到正常状态
+	if successCount > 0 && errorCount == 0 {
+		p.state.EnterNormal()
+		p.metrics.StateTransitions.WithLabelValues(p.config.Name, "recovering_to_normal").Inc()
+	}
+}
+
+func (p *Pipeline) Push(data interface{}) error {
 	if p.state.IsBlocked() {
 		return ErrPipelineBlocked
 	}
-
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if !p.started {
+		return ErrPipelineNotStarted
+	}
 	select {
 	case p.queue <- data:
 		p.metrics.QueueSize.WithLabelValues(p.config.Name).Inc()
@@ -100,8 +191,8 @@ func (p *Pipeline[T]) Push(data T) error {
 	}
 }
 
-func (p *Pipeline[T]) processor() {
-	batch := make([]T, 0, p.config.BatchSize)
+func (p *Pipeline) processor() {
+	batch := make([]interface{}, 0, p.config.BatchSize)
 	timer := time.NewTimer(p.config.BatchTimeout)
 	defer timer.Stop()
 
@@ -109,6 +200,9 @@ func (p *Pipeline[T]) processor() {
 		select {
 		case <-p.ctx.Done():
 			// 处理剩余数据
+			for data := range p.queue {
+				batch = append(batch, data)
+			}
 			if len(batch) > 0 {
 				p.flushBatch(batch)
 			}
@@ -133,38 +227,47 @@ func (p *Pipeline[T]) processor() {
 	}
 }
 
-func (p *Pipeline[T]) flushBatch(batch []T) {
+func (p *Pipeline) flushBatch(batch []interface{}) {
 	ctx := context.Background()
 
+	// 阻塞状态则将数据缓存到内存中
+	if p.state.GetStatus() == StatusBlocked {
+		p.blockData = append(p.blockData, batch...)
+		return
+	}
 	// 执行前置钩子
 	for _, hook := range p.plugins.lifecycles {
 		ctx = hook.BeforeExport(ctx, batch)
 	}
 
-	// 过滤处理
-	processed := make([]T, 0, len(batch))
-
-	for i := range processed {
-		filtered := true
+	// 创建一个新的slice来存储通过过滤的数据
+	filteredBatch := make([]interface{}, 0, len(batch))
+	for i := range batch {
+		shouldKeep := true
+		// 检查所有过滤器
 		for _, filter := range p.plugins.filters {
-			if !filter.Filter(processed[i]) {
-				filtered = false
+			if !filter.Filter(batch[i]) {
+				shouldKeep = false
 				break
 			}
 		}
-		if filtered {
-			processed[i] = processed[i]
+		// 如果通过所有过滤器，则保留该数据
+		if shouldKeep {
+			filteredBatch = append(filteredBatch, batch[i])
 		}
 	}
+
+	// 用过滤后的数据替换原始batch
+	batch = filteredBatch
 
 	// 导出日志
 	wg := sync.WaitGroup{}
 	for _, exporter := range p.plugins.exporter {
 		wg.Add(1)
-		go func(exporter plugins.Exporter[T]) {
+		go func(exporter plugins.Exporter) {
 			defer wg.Done()
 			start := time.Now()
-			if err := exporter.Export(ctx, processed); err != nil {
+			if err := exporter.Export(ctx, filteredBatch); err != nil {
 				p.handleExportError(exporter.Name(), batch)
 				// 执行错误钩子
 				for _, hook := range p.plugins.lifecycles {
@@ -180,21 +283,35 @@ func (p *Pipeline[T]) flushBatch(batch []T) {
 	p.metrics.SuccessCounter.WithLabelValues(p.config.Name).Inc()
 }
 
-func (p *Pipeline[T]) handleExportError(name string, batch []T) {
+func (p *Pipeline) handleExportError(name string, batch []interface{}) {
 	p.metrics.ErrorCounter.WithLabelValues(p.config.Name).Inc()
-	p.state.EnterRecovering()
+
 	// 尝试本地存储
 	if saveErr := p.localStore.Save(name, batch); saveErr != nil {
 		if saveErr == ErrDiskFull {
 			p.state.EnterBlocked()
+			p.metrics.StateTransitions.WithLabelValues(p.config.Name, "to_blocked").Inc()
+		}
+	} else {
+		// 如果成功保存到本地，进入恢复模式
+		if p.state.GetStatus() != StatusRecovering {
+			p.state.EnterRecovering()
+			p.metrics.StateTransitions.WithLabelValues(p.config.Name, "to_recovering").Inc()
 		}
 	}
-
 }
 
 // 关闭管道，等待所有数据处理完成
-func (p *Pipeline[T]) Close() error {
+func (p *Pipeline) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.started {
+		return nil
+	}
+	p.started = false
+
 	p.cancel()
+	close(p.queue)
 	p.wg.Wait()
-	return nil
+	return p.localStore.Close()
 }

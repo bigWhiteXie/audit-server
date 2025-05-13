@@ -26,7 +26,7 @@ func NewConsole[T any]() *Console[T] {
 func (e *Console[T]) Name() string { return "console" }
 
 // Export 将数据导出到控制台
-func (e *Console[T]) Export(ctx context.Context, data []T) error {
+func (e *Console[T]) Export(ctx context.Context, data []interface{}) error {
 	for _, d := range data {
 		_, err := fmt.Fprintf(e.writer, "[%s] %s\n", time.Now().Format(time.RFC3339), d)
 		if err != nil {
@@ -37,4 +37,4 @@ func (e *Console[T]) Export(ctx context.Context, data []T) error {
 }
 
 // 确保Console实现了Exporter接口
-var _ plugins.Exporter[any] = (*Console[any])(nil)
+var _ plugins.Exporter = (*Console[any])(nil)

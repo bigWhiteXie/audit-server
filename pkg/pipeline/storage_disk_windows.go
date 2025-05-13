@@ -8,7 +8,7 @@ import (
 	"unsafe"
 )
 
-func (s *LocalStorage[T]) isDiskFull() bool {
+func (s *LocalStorage) isDiskFull() bool {
 	kernel32 := syscall.NewLazyDLL("kernel32.dll")
 	getDiskFreeSpaceExW := kernel32.NewProc("GetDiskFreeSpaceExW")
 

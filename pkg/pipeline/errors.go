@@ -5,8 +5,9 @@ import "errors"
 // 错误定义
 var (
 	// 管道状态相关错误
-	ErrPipelineBlocked = errors.New("pipeline is blocked due to disk full")
-	ErrQueueFull       = errors.New("pipeline queue is full")
+	ErrPipelineBlocked    = errors.New("pipeline is blocked due to disk full")
+	ErrQueueFull          = errors.New("pipeline queue is full")
+	ErrPipelineNotStarted = errors.New("pipeline is not started")
 
 	// 导出相关错误
 	ErrExporterFailed    = errors.New("exporter failed to export data")
