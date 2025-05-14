@@ -3,19 +3,19 @@ package pipeline
 import (
 	"context"
 
-	"codexie.com/auditlog/pkg/plugins"
+	"codexie.com/auditlog/pkg/plugin"
 )
 
 // 插件注册方法
-func (p *Pipeline) RegisterExporter(exporter plugins.Exporter) {
+func (p *Pipeline) RegisterExporter(exporter plugin.Exporter) {
 	p.plugins.exporter[exporter.Name()] = exporter
 }
 
-func (p *Pipeline) RegisterFilter(filter plugins.Filter) {
+func (p *Pipeline) RegisterFilter(filter plugin.Filter) {
 	p.plugins.filters = append(p.plugins.filters, filter)
 }
 
-func (p *Pipeline) RegisterLifecycleHook(hook plugins.LifecycleHook) {
+func (p *Pipeline) RegisterLifecycleHook(hook plugin.LifecycleHook) {
 	p.plugins.lifecycles = append(p.plugins.lifecycles, hook)
 }
 

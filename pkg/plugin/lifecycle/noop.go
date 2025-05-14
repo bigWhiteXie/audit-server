@@ -2,8 +2,6 @@ package lifecycle
 
 import (
 	"context"
-
-	"codexie.com/auditlog/pkg/plugins"
 )
 
 // NoopHook 无操作生命周期钩子

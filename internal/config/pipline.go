@@ -3,12 +3,13 @@ package config
 import "time"
 
 type PiplineConfig struct {
-	Name             string
-	BatchSize        int
-	BatchTimeout     time.Duration
-	StorageDir       string
-	MetricsPrefix    string
-	RecoveryInterval time.Duration // 恢复检查间隔
+	Name             string        `json:"" yaml:"Name"`
+	BatchSize        int           `json:"" yaml:"BatchSize"`
+	BatchTimeout     time.Duration `json:"" yaml:"BatchTimeout"`
+	StorageDir       string        `json:"" yaml:"StorageDir"`
+	MetricsPrefix    string        `json:"" yaml:"MetricsPrefix"`
+	RecoveryInterval time.Duration `json:"" yaml:"RecoveryInterval"`
+	plugins          PluginsConfig
 }
 
 // 设置默认配置值

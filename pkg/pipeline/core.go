@@ -7,19 +7,21 @@ import (
 	"time"
 
 	"codexie.com/auditlog/internal/config"
-	"codexie.com/auditlog/pkg/plugins"
+	"codexie.com/auditlog/pkg/plugin"
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
+type plugins struct {
+	exporter   map[string]plugin.Exporter
+	filters    []plugin.Filter
+	lifecycles []plugin.LifecycleHook
+}
+
 // 管道核心结构
 type Pipeline struct {
-	config  config.PiplineConfig
-	queue   chan interface{}
-	plugins struct {
-		exporter   map[string]plugins.Exporter
-		filters    []plugins.Filter
-		lifecycles []plugins.LifecycleHook
-	}
+	config     config.PiplineConfig
+	queue      chan interface{}
+	plugins    plugins
 	blockData  []interface{}
 	state      *State
 	localStore *LocalStorage
@@ -42,14 +44,10 @@ func New(cfg config.PiplineConfig) *Pipeline {
 		ctx:       ctx,
 		cancel:    cancel,
 		blockData: make([]interface{}, 0),
-		plugins: struct {
-			exporter   map[string]plugins.Exporter
-			filters    []plugins.Filter
-			lifecycles []plugins.LifecycleHook
-		}{
-			exporter:   make(map[string]plugins.Exporter),
-			filters:    make([]plugins.Filter, 0),
-			lifecycles: make([]plugins.LifecycleHook, 0),
+		plugins: plugins{
+			exporter:   make(map[string]plugin.Exporter),
+			filters:    make([]plugin.Filter, 0),
+			lifecycles: make([]plugin.LifecycleHook, 0),
 		},
 	}
 
@@ -58,9 +56,6 @@ func New(cfg config.PiplineConfig) *Pipeline {
 
 	// 初始化指标
 	p.metrics = NewMetrics(cfg.Name)
-
-	// 注册默认生命周期钩子
-	p.RegisterLifecycleHook(&NoopLifecycleHook{})
 
 	return p
 }
@@ -264,7 +259,7 @@ func (p *Pipeline) flushBatch(batch []interface{}) {
 	wg := sync.WaitGroup{}
 	for _, exporter := range p.plugins.exporter {
 		wg.Add(1)
-		go func(exporter plugins.Exporter) {
+		go func(exporter plugin.Exporter) {
 			defer wg.Done()
 			start := time.Now()
 			if err := exporter.Export(ctx, filteredBatch); err != nil {
@@ -284,7 +279,7 @@ func (p *Pipeline) flushBatch(batch []interface{}) {
 }
 
 func (p *Pipeline) handleExportError(name string, batch []interface{}) {
-	p.metrics.ErrorCounter.WithLabelValues(p.config.Name).Inc()
+	p.metrics.ErrorCounter.WithLabelValues(p.config.Name).Add(float64(len(batch)))
 
 	// 尝试本地存储
 	if saveErr := p.localStore.Save(name, batch); saveErr != nil {

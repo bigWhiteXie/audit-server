@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"codexie.com/auditlog/pkg/plugins"
+	"codexie.com/auditlog/pkg/plugin"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -50,7 +50,7 @@ func (log *AuditLog) Name() string {
 	return TablePrefix
 }
 
-func (log *AuditLog) SaveBatch(ctx context.Context, tx *gorm.DB, batch []plugins.Entity) error {
+func (log *AuditLog) SaveBatch(ctx context.Context, tx *gorm.DB, batch []plugin.Entity) error {
 	// 转换为具体类型
 	auditLogs := make([]*AuditLog, 0, len(batch))
 	for _, entity := range batch {

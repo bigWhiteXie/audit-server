@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"codexie.com/auditlog/internal/config"
-	"codexie.com/auditlog/pkg/plugins"
+	"codexie.com/auditlog/pkg/plugin"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -36,9 +36,9 @@ func (e *MySQLExporter) Export(ctx context.Context, data []interface{}) error {
 	}
 
 	// 类型转换
-	entities := make([]plugins.Entity, 0, len(data))
+	entities := make([]plugin.Entity, 0, len(data))
 	for _, item := range data {
-		entity, ok := item.(plugins.Entity)
+		entity, ok := item.(plugin.Entity)
 		if !ok {
 			return fmt.Errorf("invalid data type: %T does not implement Entity interface", item)
 		}
@@ -88,7 +88,7 @@ func (e *MySQLExporter) Close() error {
 }
 
 func init() {
-	plugins.RegisterExporterFactory("mysql", func(config map[string]any) plugins.Exporter {
+	plugin.RegisterExporterFactory("mysql", func(config map[string]any) plugin.Exporter {
 		return NewExporter(config)
 	})
 }

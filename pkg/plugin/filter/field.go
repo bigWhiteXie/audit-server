@@ -1,8 +1,6 @@
 package filter
 
-import (
-	"codexie.com/auditlog/pkg/plugins"
-)
+import "codexie.com/auditlog/pkg/plugin"
 
 // Field 字段过滤器
 type Field struct {
@@ -30,4 +28,4 @@ func (f *Field) Filter(data interface{}) bool {
 }
 
 // 确保Field实现了Filter接口
-var _ plugins.Filter = (*Field)(nil)
+var _ plugin.Filter = (*Field)(nil)

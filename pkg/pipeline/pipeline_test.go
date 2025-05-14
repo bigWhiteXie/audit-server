@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"codexie.com/auditlog/internal/config"
-	"codexie.com/auditlog/pkg/plugins"
+	"codexie.com/auditlog/pkg/plugin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zeromicro/go-zero/core/logx"
@@ -46,7 +46,7 @@ func (f *FailingExporter) Export(ctx context.Context, data []interface{}) error 
 	return fmt.Errorf("simulated export error")
 }
 
-func setupTestPipeline(t *testing.T, cfg config.PiplineConfig, exporter plugins.Exporter) *Pipeline {
+func setupTestPipeline(t *testing.T, cfg config.PiplineConfig, exporter plugin.Exporter) *Pipeline {
 	p := New(cfg)
 	p.RegisterExporter(exporter)
 	err := p.Start()
