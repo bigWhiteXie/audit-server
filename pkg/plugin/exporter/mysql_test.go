@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -44,9 +45,9 @@ func TestMySQLExporter_Export(t *testing.T) {
 	db.Table(data.TableName()).AutoMigrate(&model.AuditLog{})
 
 	// 初始化Exporter
-	cfgMap := map[string]interface{}{
+	cfgMap := map[string]string{
 		"host":     host,
-		"port":     port,
+		"port":     strconv.Itoa(port),
 		"user":     user,
 		"password": password,
 		"database": database,

@@ -3,6 +3,7 @@ package exporter
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"codexie.com/auditlog/internal/config"
@@ -16,13 +17,23 @@ type MySQLExporter struct {
 	db *gorm.DB
 }
 
-func NewExporter(cfgMap map[string]any) *MySQLExporter {
+func NewExporter(cfgMap map[string]string) *MySQLExporter {
+	port, err := strconv.Atoi(cfgMap["port"])
+	maxOpenConns, err := strconv.Atoi(cfgMap["max_open_conns"])
+	maxIdleConns, err := strconv.Atoi(cfgMap["max_idle_conns"])
+	connMaxLifetime, err := strconv.Atoi(cfgMap["conn_max_lifetime"])
+	if err != nil {
+		panic(err)
+	}
 	cfg := config.MySQLConf{}
-	cfg.Host = cfgMap["host"].(string)
-	cfg.Port = cfgMap["port"].(int64)
-	cfg.User = cfgMap["user"].(string)
-	cfg.Password = cfgMap["password"].(string)
-	cfg.Database = cfgMap["database"].(string)
+	cfg.Host = cfgMap["host"]
+	cfg.Port = int64(port)
+	cfg.User = cfgMap["user"]
+	cfg.Password = cfgMap["password"]
+	cfg.Database = cfgMap["database"]
+	cfg.MaxOpenConns = maxOpenConns
+	cfg.MaxIdleConns = maxIdleConns
+	cfg.ConnMaxLifetime = connMaxLifetime
 	db := initDB(cfg)
 	return &MySQLExporter{
 		MySQLConf: cfg,
@@ -88,7 +99,7 @@ func (e *MySQLExporter) Close() error {
 }
 
 func init() {
-	plugin.RegisterExporterFactory("mysql", func(config map[string]any) plugin.Exporter {
+	plugin.RegisterExporterFactory("mysql", func(config map[string]string) plugin.Exporter {
 		return NewExporter(config)
 	})
 }

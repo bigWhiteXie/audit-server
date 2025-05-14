@@ -6,8 +6,6 @@ import (
 	"io"
 	"os"
 	"time"
-
-	"codexie.com/auditlog/pkg/plugin"
 )
 
 // Console 控制台导出器
@@ -35,6 +33,3 @@ func (e *Console[T]) Export(ctx context.Context, data []interface{}) error {
 	}
 	return nil
 }
-
-// 确保Console实现了Exporter接口
-var _ plugin.Exporter = (*Console[any])(nil)

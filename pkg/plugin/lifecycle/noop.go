@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"context"
+
+	"codexie.com/auditlog/pkg/plugin"
 )
 
 // NoopHook 无操作生命周期钩子
@@ -26,4 +28,4 @@ func (h *NoopHook) OnError(ctx context.Context, err error, batch []interface{}) 
 }
 
 // 确保NoopHook实现了LifecycleHook接口
-var _ plugins.LifecycleHook = (*NoopHook)(nil)
+var _ plugin.LifecycleHook = (*NoopHook)(nil)

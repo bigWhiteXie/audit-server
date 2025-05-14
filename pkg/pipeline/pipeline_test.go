@@ -58,9 +58,9 @@ func TestPipeline_NormalOperation(t *testing.T) {
 	cfg := config.PiplineConfig{
 		Name:             "test-normal-pipeline",
 		BatchSize:        10000, // 调整批次大小以便更快看到输出
-		BatchTimeout:     1 * time.Second,
+		BatchTimeout:     1,
 		StorageDir:       "./",
-		RecoveryInterval: 1 * time.Second, // 加快恢复检查，虽然此测试不直接测恢复
+		RecoveryInterval: 1, // 加快恢复检查，虽然此测试不直接测恢复
 	}
 
 	consoleExporter := &ConsoleExporter{}
@@ -93,7 +93,7 @@ func TestPipeline_NormalOperation(t *testing.T) {
 	}()
 
 	// 等待pipeline处理完剩余数据
-	time.Sleep(cfg.BatchTimeout + 2*time.Second) // 给足够的时间让最后一个批次处理完
+	time.Sleep(time.Duration(cfg.BatchTimeout) * time.Second) // 给足够的时间让最后一个批次处理完
 
 	p.Close()
 	t.Logf("Total data sent: %d", totalDataSent)
@@ -117,9 +117,9 @@ func TestPipeline_ErrorOperation_LocalStorage(t *testing.T) {
 	cfg := config.PiplineConfig{
 		Name:             "test-error-pipeline",
 		BatchSize:        1000,
-		BatchTimeout:     1 * time.Second,
+		BatchTimeout:     1,
 		StorageDir:       logIDir,
-		RecoveryInterval: 100 * time.Millisecond, // 加快恢复检查
+		RecoveryInterval: 1, // 加快恢复检查
 	}
 
 	failingExporter := &FailingExporter{}
@@ -148,7 +148,7 @@ func TestPipeline_ErrorOperation_LocalStorage(t *testing.T) {
 	}()
 
 	// 等待pipeline尝试处理并写入本地文件
-	time.Sleep(cfg.BatchTimeout + cfg.RecoveryInterval + 500*time.Millisecond)
+	time.Sleep(time.Duration(cfg.BatchTimeout) + time.Duration(cfg.RecoveryInterval) + 500*time.Millisecond)
 	p.Close()
 	logIDir = path.Join(logIDir, cfg.Name)
 	// 检查是否创建了临时文件

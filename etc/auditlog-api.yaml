@@ -2,18 +2,28 @@ Name: auditlog-api
 Host: 0.0.0.0
 Port: 28540
 
-MySQLConf:
-  Enable: true
-  User: root
-  Password: j3391111
-  Host: 192.168.126.100
-  Port: 3306
-  Database: auditlog
-  CharSet: utf8
-  ParseTime: true
-  TimeZOne: Local
-  AutoMigrate: true
-  SingularTable: true
-  MaxOpenConns: 100
-  MaxIdleConns: 5
-  ConnMaxLifetime: 600
+
+Pipelines:
+  - Name: auditlog
+    BatchSize: 10000
+    BatchTimeout: 10
+    StorageDir: /tmp/auditlog
+    MetricsPrefix: auditlog
+    RecoveryInterval: 30
+    Plugins:
+      exporters:
+        - Name: mysql
+          Config:
+            host: "192.168.126.100"          # MySQL服务器地址
+            port: "3306"                 # MySQL端口
+            user: "root"      # 数据库用户名
+            password: "j3391111" # 数据库密码
+            database: "auditlog"    # 数据库名称
+            max_open_conns: "100"        # 最大打开连接数 (默认值)
+            max_idle_conns: "20"         # 最大空闲连接数 (默认值)
+            conn_max_lifetime: "3600"    # 连接最大存活时间(秒)
+            # 以下为可选参数
+            charset: "utf8mb4"         # 字符集
+            time_zone: "Local"         # 时区设置
+
+    

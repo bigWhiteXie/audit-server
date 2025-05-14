@@ -68,7 +68,7 @@ func (p *Pipeline) Start() error {
 	if p.started {
 		return nil
 	}
-
+	logx.Infof("===========================pipeline %s started===========================", p.config.Name)
 	// 启动主处理器
 	p.wg.Add(1)
 	go func() {
@@ -87,9 +87,63 @@ func (p *Pipeline) Start() error {
 	return nil
 }
 
+func (p *Pipeline) Push(data interface{}) error {
+	if p.state.IsBlocked() {
+		return ErrPipelineBlocked
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if !p.started {
+		return ErrPipelineNotStarted
+	}
+	select {
+	case p.queue <- data:
+		p.metrics.QueueSize.WithLabelValues(p.config.Name).Inc()
+		return nil
+	default:
+		return ErrQueueFull
+	}
+}
+
+func (p *Pipeline) processor() {
+	batch := make([]interface{}, 0, p.config.BatchSize)
+	timer := time.NewTimer(time.Duration(p.config.BatchTimeout) * time.Second)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-p.ctx.Done():
+			// 处理剩余数据
+			for data := range p.queue {
+				batch = append(batch, data)
+			}
+			if len(batch) > 0 {
+				p.flushBatch(batch)
+			}
+			return
+
+		case data := <-p.queue:
+			p.metrics.QueueSize.WithLabelValues(p.config.Name).Dec()
+			batch = append(batch, data)
+			if len(batch) >= p.config.BatchSize {
+				p.flushBatch(batch)
+				batch = batch[:0]
+				timer.Reset(time.Duration(p.config.BatchTimeout) * time.Second)
+			}
+
+		case <-timer.C:
+			if len(batch) > 0 {
+				p.flushBatch(batch)
+				batch = batch[:0]
+			}
+			timer.Reset(time.Duration(p.config.BatchTimeout) * time.Second)
+		}
+	}
+}
+
 // 恢复监控：尝试读取磁盘中的异常数据进行导出
 func (p *Pipeline) recoveryMonitor() {
-	ticker := time.NewTicker(p.config.RecoveryInterval)
+	ticker := time.NewTicker(time.Duration(p.config.RecoveryInterval) * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -103,12 +157,10 @@ func (p *Pipeline) recoveryMonitor() {
 			case StatusBlocked:
 				if !p.localStore.isDiskFull() {
 					if err := p.localStore.Save(p.config.Name, p.blockData); err != nil {
-						p.metrics.RecoveryErrors.WithLabelValues(p.config.Name).Inc()
 						continue
 					}
 					p.blockData = p.blockData[:0]
 					p.state.EnterRecovering()
-					p.metrics.StateTransitions.WithLabelValues(p.config.Name, "blocked_to_normal").Inc()
 				}
 			}
 		}
@@ -117,12 +169,10 @@ func (p *Pipeline) recoveryMonitor() {
 
 // 尝试从磁盘恢复数据
 func (p *Pipeline) tryRecoverFromDisk() {
-	p.metrics.RecoveryAttempts.WithLabelValues(p.config.Name).Inc()
 
 	// 获取恢复数据通道
 	dataCh, err := p.localStore.Recover()
 	if err != nil {
-		p.metrics.RecoveryErrors.WithLabelValues(p.config.Name).Inc()
 		return
 	}
 
@@ -151,7 +201,6 @@ func (p *Pipeline) tryRecoverFromDisk() {
 		if err := exporter.Export(ctx, batch.Data); err != nil {
 			exportSuccess = false
 			errorCount++
-			p.metrics.RecoveryErrors.WithLabelValues(p.config.Name).Inc()
 			logx.Errorf("failed to export data: %v", err)
 			continue
 		}
@@ -159,66 +208,9 @@ func (p *Pipeline) tryRecoverFromDisk() {
 		successCount += len(batch.Data)
 	}
 
-	p.metrics.RecoveredItems.WithLabelValues(p.config.Name).Add(float64(successCount))
-
 	// 如果成功恢复了数据，切换到正常状态
 	if successCount > 0 && errorCount == 0 {
 		p.state.EnterNormal()
-		p.metrics.StateTransitions.WithLabelValues(p.config.Name, "recovering_to_normal").Inc()
-	}
-}
-
-func (p *Pipeline) Push(data interface{}) error {
-	if p.state.IsBlocked() {
-		return ErrPipelineBlocked
-	}
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if !p.started {
-		return ErrPipelineNotStarted
-	}
-	select {
-	case p.queue <- data:
-		p.metrics.QueueSize.WithLabelValues(p.config.Name).Inc()
-		return nil
-	default:
-		return ErrQueueFull
-	}
-}
-
-func (p *Pipeline) processor() {
-	batch := make([]interface{}, 0, p.config.BatchSize)
-	timer := time.NewTimer(p.config.BatchTimeout)
-	defer timer.Stop()
-
-	for {
-		select {
-		case <-p.ctx.Done():
-			// 处理剩余数据
-			for data := range p.queue {
-				batch = append(batch, data)
-			}
-			if len(batch) > 0 {
-				p.flushBatch(batch)
-			}
-			return
-
-		case data := <-p.queue:
-			p.metrics.QueueSize.WithLabelValues(p.config.Name).Dec()
-			batch = append(batch, data)
-			if len(batch) >= p.config.BatchSize {
-				p.flushBatch(batch)
-				batch = batch[:0]
-				timer.Reset(p.config.BatchTimeout)
-			}
-
-		case <-timer.C:
-			if len(batch) > 0 {
-				p.flushBatch(batch)
-				batch = batch[:0]
-			}
-			timer.Reset(p.config.BatchTimeout)
-		}
 	}
 }
 
@@ -285,13 +277,11 @@ func (p *Pipeline) handleExportError(name string, batch []interface{}) {
 	if saveErr := p.localStore.Save(name, batch); saveErr != nil {
 		if saveErr == ErrDiskFull {
 			p.state.EnterBlocked()
-			p.metrics.StateTransitions.WithLabelValues(p.config.Name, "to_blocked").Inc()
 		}
 	} else {
 		// 如果成功保存到本地，进入恢复模式
 		if p.state.GetStatus() != StatusRecovering {
 			p.state.EnterRecovering()
-			p.metrics.StateTransitions.WithLabelValues(p.config.Name, "to_recovering").Inc()
 		}
 	}
 }
@@ -308,5 +298,6 @@ func (p *Pipeline) Close() error {
 	p.cancel()
 	close(p.queue)
 	p.wg.Wait()
+	logx.Infof("===========================pipeline %s closed===========================", p.config.Name)
 	return p.localStore.Close()
 }
