@@ -11,10 +11,13 @@ import (
 // NextRunTime返回下次调度时间（如cron表达式解析结果）
 type Task interface {
 	Name() string
-	Run() error
-	ExeInterval() int64 // 执行间隔，单位秒
-	NextRunTime() time.Time
 	Priority() int
+	ExeInterval() int64 // 执行间隔，单位秒
+
+	Run() error
+
+	NextRunTime() time.Time
+	SetNextRunTime(time.Time)
 }
 
 // DistributedLock 分布式锁接口，便于后续扩展不同存储实现（如Redis、DB等）

@@ -7,10 +7,10 @@ import (
 
 type TimeWheel struct {
 	ticker      *time.Ticker
-	slots       []map[string]Task // 槽位使用Map去重
+	slots       []map[string]Task
 	currentSlot int
 	taskQueue   *TaskQueue
-	slotMutexes []sync.Mutex // 每个槽位独立锁
+	slotMutexes []sync.Mutex
 }
 
 func NewTimeWheel(slotCount int, interval time.Duration, taskQueue *TaskQueue) *TimeWheel {
@@ -29,7 +29,7 @@ func NewTimeWheel(slotCount int, interval time.Duration, taskQueue *TaskQueue) *
 
 func (tw *TimeWheel) AddTask(task Task) {
 	now := time.Now()
-	nextTime := now.Add(time.Duration(task.ExeInterval()) * time.Second)
+	nextTime := task.NextRunTime()
 	if nextTime.Before(now) {
 		nextTime = now // 防止历史时间
 	}
@@ -54,6 +54,8 @@ func (tw *TimeWheel) Advance() {
 		for _, task := range currentTasks {
 			if time.Now().After(task.NextRunTime()) {
 				tw.taskQueue.Push(task)
+			} else {
+				tw.AddTask(task)
 			}
 		}
 

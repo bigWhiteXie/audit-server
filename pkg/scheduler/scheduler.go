@@ -1,8 +1,10 @@
 package scheduler
 
 import (
+	"context"
 	"time"
 
+	"github.com/zeromicro/go-zero/core/logx"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -17,57 +19,109 @@ type Scheduler struct {
 	ScheduleConfig
 
 	db             *gorm.DB
-	taskMap        map[string]Task
+	taskQueue      *TaskQueue
+	timeWheel      *TimeWheel
 	lock           DistributedLock
 	circuitBreaker CircuitBreaker
-	minInterval    int64 // 最小执行间隔，单位秒
 }
 
 func NewScheduler(db *gorm.DB, lock DistributedLock, config ScheduleConfig) *Scheduler {
+	taskQueue := NewTaskQueue()
+
 	return &Scheduler{
-		db:      db,
-		taskMap: make(map[string]Task),
-		lock:    lock,
-		circuitBreaker: CircuitBreaker{
-			failCount:   make(map[string]int),
-			trippedAt:   make(map[string]time.Time),
-			threshold:   config.FailThreshold,
-			isolateTime: time.Duration(config.IsolateDuration) * time.Second,
-		},
+		db:             db,
+		taskQueue:      taskQueue,
+		timeWheel:      NewTimeWheel(100, time.Millisecond*100, taskQueue),
+		lock:           lock,
+		circuitBreaker: *NewCircuitBreaker(config.FailThreshold, time.Duration(config.IsolateDuration)*time.Second),
 	}
 }
 
 func (s *Scheduler) RegisterTask(task Task) {
-	s.taskMap[task.Name()] = task
+	// 先查询数据库中是否存在该任务，若存在则直接读取
+	taskEntry := &ScheduleTask{}
+	if err := s.db.Model(taskEntry).Where("task_name = ?", task.Name()).First(task.Name()).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			taskEntry.NextRunTime = time.Now().Add(time.Duration(task.ExeInterval()) * time.Second)
+			taskEntry.Priority = task.Priority()
 
-	// 尝试往数据库中插入任务，若已存在则忽略
-	taskEntry := &ScheduleTask{
-		TaskID:      task.Name(),
-		NextRunTime: time.Now().Add(time.Duration(task.ExeInterval()) * time.Second),
-		Priority:    task.Priority(),
+			if err := s.db.Model(taskEntry).Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "task_name"}},
+				DoNothing: true,
+			}).Create(taskEntry).Error; err != nil {
+				panic(err)
+			}
+		} else {
+			panic(err)
+		}
 	}
-	if s.minInterval == 0 || s.minInterval > task.ExeInterval() {
-		s.minInterval = task.ExeInterval()
-	}
-	if err := s.db.Model(taskEntry).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "task_id"}},
-		DoNothing: true,
-	}).Create(taskEntry).Error; err != nil {
-		panic(err)
+
+	task.SetNextRunTime(taskEntry.NextRunTime)
+	s.timeWheel.AddTask(task)
+}
+
+func (s *Scheduler) Start(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			logx.Info("=========================scheduler stopped by ctx Done=========================")
+			return
+		default:
+			task := s.taskQueue.Pop()
+			s.runTask(task)
+		}
 	}
 }
 
-// func (s *Scheduler) Start(ctx context.Context) {
-// 	ticker := time.NewTicker(time.Duration(s.minInterval) * time.Second)
-// 	defer ticker.Stop()
+func (s *Scheduler) runTask(task Task) {
+	taskEntry := &ScheduleTask{}
+	isRun := false
+	defer func() {
+		if err := recover(); err != nil {
+			logx.Error("task run failed, taskId: %s, err: %v", task.Name(), err)
+		}
+		task.SetNextRunTime(time.Now().Add(time.Duration(task.ExeInterval()) * time.Second))
+		s.timeWheel.AddTask(task)
+		if isRun {
+			if err := s.db.Model(taskEntry).Where("task_name = ?", task.Name()).Updates(taskEntry).Error; err != nil {
+				logx.Error("update taskEntry failed, taskName: %s, err: %v", task.Name(), err)
+			}
+		}
+	}()
 
-// 	for {
-// 		select {
-// 		case <-ctx.Done():
-// 			logx.Info("=========================scheduler stopped by ctx Done=========================")
-// 			return
-// 		case <-ticker.C:
-// 			s.runTasks()
-// 		}
-// 	}
-// }
+	if s.circuitBreaker.IsIsolated(task.Name()) {
+		logx.Infof("task is isolated, taskId: %s", task.Name())
+		return
+	}
+
+	// 查询任务信息
+	taskEntry.LastRunTime = time.Now()
+	if err := s.db.Model(taskEntry).Where("task_name = ?", task.Name()).First(taskEntry).Error; err != nil {
+		logx.Error("find taskEntry failed, taskName: %s", task.Name())
+		return
+	}
+
+	// 调整到下次执行时间
+	if time.Now().After(taskEntry.NextRunTime) {
+		time.Sleep(taskEntry.NextRunTime.Sub(time.Now()))
+	}
+	if err := task.Run(); err != nil {
+		s.onFailure(taskEntry, err)
+		return
+	}
+
+	// 更新任务、熔断器状态等
+	s.onSuccess(taskEntry)
+
+}
+
+func (s *Scheduler) onFailure(taskEntry *ScheduleTask, err error) {
+	s.circuitBreaker.OnFailure(taskEntry.TaskName)
+	taskEntry.FailureCount++
+	logx.Error("task run failed, taskId: %s, err: %v", taskEntry.TaskName, err)
+}
+
+func (s *Scheduler) onSuccess(taskEntry *ScheduleTask) {
+	s.circuitBreaker.OnSuccess(taskEntry.TaskName)
+	taskEntry.FailureCount = 0
+}
