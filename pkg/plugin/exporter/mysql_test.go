@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 	"testing"
 	"time"
 
@@ -45,12 +44,8 @@ func TestMySQLExporter_Export(t *testing.T) {
 	db.Table(data.TableName()).AutoMigrate(&model.AuditLog{})
 
 	// 初始化Exporter
-	cfgMap := map[string]string{
-		"host":     host,
-		"port":     strconv.Itoa(port),
-		"user":     user,
-		"password": password,
-		"database": database,
+	cfgMap := map[string]any{
+		"db": db,
 	}
 	exporter := NewExporter(cfgMap)
 
@@ -70,7 +65,7 @@ func TestMySQLExporter_Export(t *testing.T) {
 			Message:      "Resource created successfully",
 			TimeStamp:    time.Now().UnixNano(),
 			ClientIP:     "192.168.1.1",
-			FromService:  "api-service",
+			Module:       "api-service",
 			TraceID:      fmt.Sprintf("trace-%04d", i),
 		})
 	}

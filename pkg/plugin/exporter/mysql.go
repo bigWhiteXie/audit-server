@@ -3,41 +3,23 @@ package exporter
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"codexie.com/auditlog/internal/config"
+	"codexie.com/auditlog/internal/model"
 	"codexie.com/auditlog/pkg/plugin"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
 type MySQLExporter struct {
-	config.MySQLConf
 	db *gorm.DB
 }
 
-func NewExporter(cfgMap map[string]string) *MySQLExporter {
-	port, err := strconv.Atoi(cfgMap["port"])
-	maxOpenConns, err := strconv.Atoi(cfgMap["max_open_conns"])
-	maxIdleConns, err := strconv.Atoi(cfgMap["max_idle_conns"])
-	connMaxLifetime, err := strconv.Atoi(cfgMap["conn_max_lifetime"])
-	if err != nil {
-		panic(err)
-	}
-	cfg := config.MySQLConf{}
-	cfg.Host = cfgMap["host"]
-	cfg.Port = int64(port)
-	cfg.User = cfgMap["user"]
-	cfg.Password = cfgMap["password"]
-	cfg.Database = cfgMap["database"]
-	cfg.MaxOpenConns = maxOpenConns
-	cfg.MaxIdleConns = maxIdleConns
-	cfg.ConnMaxLifetime = connMaxLifetime
-	db := initDB(cfg)
+func NewExporter(cfgMap map[string]any) *MySQLExporter {
+	db := cfgMap["db"].(*gorm.DB)
 	return &MySQLExporter{
-		MySQLConf: cfg,
-		db:        db,
+		db: db,
 	}
 }
 
@@ -47,47 +29,33 @@ func (e *MySQLExporter) Export(ctx context.Context, data []interface{}) error {
 	}
 
 	// 类型转换
-	entities := make([]plugin.Entity, 0, len(data))
+	entities := make([]model.Entity, 0, len(data))
 	for _, item := range data {
-		entity, ok := item.(plugin.Entity)
+		entity, ok := item.(model.Entity)
 		if !ok {
 			return fmt.Errorf("invalid data type: %T does not implement Entity interface", item)
 		}
 		entities = append(entities, entity)
 	}
 
-	// 批量插入（使用INSERT IGNORE）
-	tx := e.db.WithContext(ctx).Begin()
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
+	err := e.db.Transaction(func(tx *gorm.DB) error {
+		batchSize := 1000
+		for i := 0; i < len(entities); i += batchSize {
+			end := i + batchSize
+			if end > len(entities) {
+				end = len(entities)
+			}
+
+			batch := entities[i:end]
+			// 使用Clause.OnConflict实现INSERT IGNORE
+			if err := batch[0].SaveBatch(ctx, tx, batch); err != nil {
+				return err
+			}
 		}
-	}()
+		return nil
+	})
 
-	if err := tx.Error; err != nil {
-		return fmt.Errorf("transaction error: %w", err)
-	}
-
-	batchSize := 1000
-	for i := 0; i < len(entities); i += batchSize {
-		end := i + batchSize
-		if end > len(entities) {
-			end = len(entities)
-		}
-
-		batch := entities[i:end]
-		// 使用Clause.OnConflict实现INSERT IGNORE
-		if err := batch[0].SaveBatch(ctx, tx, batch); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("batch insert failed: %w", err)
-		}
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		return fmt.Errorf("commit transaction failed: %w", err)
-	}
-
-	return nil
+	return err
 }
 
 func (e *MySQLExporter) Name() string {
@@ -99,7 +67,7 @@ func (e *MySQLExporter) Close() error {
 }
 
 func init() {
-	plugin.RegisterExporterFactory("mysql", func(config map[string]string) plugin.Exporter {
+	plugin.RegisterExporterFactory("mysql", func(config map[string]any) plugin.Exporter {
 		return NewExporter(config)
 	})
 }

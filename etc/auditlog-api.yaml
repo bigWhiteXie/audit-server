@@ -2,9 +2,22 @@ Name: auditlog-api
 Host: 0.0.0.0
 Port: 28540
 
+MySQL:
+  host: "192.168.126.100"          # MySQL服务器地址
+  port: 3306                 # MySQL端口
+  user: "root"      # 数据库用户名
+  password: "j3391111" # 数据库密码
+  database: "auditlog"    # 数据库名称
+  max_open_conns: 100        # 最大打开连接数 (默认值)
+  max_idle_conns: 20        # 最大空闲连接数 (默认值)
+  conn_max_lifetime: 3600    # 连接最大存活时间(秒)
+
+Redis:
+  Host: 192.168.126.100:6379
+  PASS: ""
 
 Pipelines:
-  - Name: auditlog
+  - Name: audit_log
     BatchSize: 10000
     BatchTimeout: 10
     StorageDir: /tmp/auditlog
@@ -14,16 +27,11 @@ Pipelines:
       exporters:
         - Name: mysql
           Config:
-            host: "192.168.126.100"          # MySQL服务器地址
-            port: "3306"                 # MySQL端口
-            user: "root"      # 数据库用户名
-            password: "j3391111" # 数据库密码
-            database: "auditlog"    # 数据库名称
-            max_open_conns: "100"        # 最大打开连接数 (默认值)
-            max_idle_conns: "20"         # 最大空闲连接数 (默认值)
-            conn_max_lifetime: "3600"    # 连接最大存活时间(秒)
-            # 以下为可选参数
-            charset: "utf8mb4"         # 字符集
-            time_zone: "Local"         # 时区设置
+            db: "#svc.DB"
+      lifecycles:
+        - Name: logid
+          Config:
+            redis: "#svc.Redis"
+            db: "#svc.DB"
 
     

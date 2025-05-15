@@ -12,9 +12,8 @@ type AuditLog struct {
 	Result       string `json:"result"`        // 操作结果（success/fail）
 	Message      string `json:"message"`       // 失败或详细信息
 	ClientIP     string `json:"client_ip"`     // 客户端IP
-	FromService  string `json:"from_service"`  // 来源服务
+	Module       string `json:"module"`        // 模块
 	TraceID      string `json:"trace_id"`      // 链路追踪ID
-	CreatedAt    int64  `json:"created_at"`    // 时间戳（毫秒）
 }
 
 type BaseResponse struct {

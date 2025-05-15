@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS schedule_pos (
+    id BIGINT UNSIGNED AUTO_INCREMENT COMMENT '自增主键',
+    name VARCHAR(255) UNIQUE NOT NULL COMMENT '唯一名称',
+    schedule_begin_pos INT NOT NULL COMMENT '调度开始位置',
+    schedule_end_pos INT NOT NULL COMMENT '调度结束位置',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    modify_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+    PRIMARY KEY (id),
+    UNIQUE INDEX idx_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='调度位置表';

@@ -2,8 +2,6 @@ package plugin
 
 import (
 	"context"
-
-	"gorm.io/gorm"
 )
 
 // Plugin 所有插件的基础接口
@@ -28,10 +26,4 @@ type LifecycleHook interface {
 	Plugin
 	BeforeExport(ctx context.Context, batch []interface{}) context.Context
 	OnError(ctx context.Context, err error, batch []interface{})
-}
-
-type Entity interface {
-	Name() string
-	TableName() string
-	SaveBatch(ctx context.Context, db *gorm.DB, data []Entity) error
 }

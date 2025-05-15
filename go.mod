@@ -4,10 +4,14 @@ go 1.23.8
 
 require (
 	github.com/IBM/sarama v1.43.1
+	github.com/go-redis/redis v6.15.9+incompatible
+	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8
+	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.21.1
 	github.com/redis/go-redis/v9 v9.8.0
 	github.com/stretchr/testify v1.10.0
 	github.com/zeromicro/go-zero v1.8.3
+	golang.org/x/sync v0.11.0
 	golang.org/x/sys v0.30.0
 	gorm.io/driver/mysql v1.5.7
 	gorm.io/gorm v1.26.1
@@ -29,7 +33,6 @@ require (
 	github.com/go-sql-driver/mysql v1.9.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.20.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
@@ -45,6 +48,7 @@ require (
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/openzipkin/zipkin-go v0.4.3 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.2 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect

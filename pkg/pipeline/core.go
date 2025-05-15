@@ -19,7 +19,8 @@ type plugins struct {
 
 // 管道核心结构
 type Pipeline struct {
-	config     config.PiplineConfig
+	config.PiplineConfig
+
 	queue      chan interface{}
 	plugins    plugins
 	blockData  []interface{}
@@ -38,12 +39,12 @@ func New(cfg config.PiplineConfig) *Pipeline {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	p := &Pipeline{
-		config:    cfg,
-		queue:     make(chan interface{}, cfg.BatchSize),
-		state:     NewState(),
-		ctx:       ctx,
-		cancel:    cancel,
-		blockData: make([]interface{}, 0),
+		PiplineConfig: cfg,
+		queue:         make(chan interface{}, cfg.BatchSize*10),
+		state:         NewState(),
+		ctx:           ctx,
+		cancel:        cancel,
+		blockData:     make([]interface{}, 0),
 		plugins: plugins{
 			exporter:   make(map[string]plugin.Exporter),
 			filters:    make([]plugin.Filter, 0),
@@ -68,7 +69,7 @@ func (p *Pipeline) Start() error {
 	if p.started {
 		return nil
 	}
-	logx.Infof("===========================pipeline %s started===========================", p.config.Name)
+	logx.Infof("===========================pipeline %s started===========================", p.Name)
 	// 启动主处理器
 	p.wg.Add(1)
 	go func() {
@@ -98,7 +99,7 @@ func (p *Pipeline) Push(data interface{}) error {
 	}
 	select {
 	case p.queue <- data:
-		p.metrics.QueueSize.WithLabelValues(p.config.Name).Inc()
+		p.metrics.QueueSize.WithLabelValues(p.Name).Inc()
 		return nil
 	default:
 		return ErrQueueFull
@@ -106,8 +107,8 @@ func (p *Pipeline) Push(data interface{}) error {
 }
 
 func (p *Pipeline) processor() {
-	batch := make([]interface{}, 0, p.config.BatchSize)
-	timer := time.NewTimer(time.Duration(p.config.BatchTimeout) * time.Second)
+	batch := make([]interface{}, 0, p.BatchSize)
+	timer := time.NewTimer(time.Duration(p.BatchTimeout) * time.Second)
 	defer timer.Stop()
 
 	for {
@@ -123,12 +124,12 @@ func (p *Pipeline) processor() {
 			return
 
 		case data := <-p.queue:
-			p.metrics.QueueSize.WithLabelValues(p.config.Name).Dec()
+			p.metrics.QueueSize.WithLabelValues(p.Name).Dec()
 			batch = append(batch, data)
-			if len(batch) >= p.config.BatchSize {
+			if len(batch) >= p.BatchSize {
 				p.flushBatch(batch)
 				batch = batch[:0]
-				timer.Reset(time.Duration(p.config.BatchTimeout) * time.Second)
+				timer.Reset(time.Duration(p.BatchTimeout) * time.Second)
 			}
 
 		case <-timer.C:
@@ -136,14 +137,14 @@ func (p *Pipeline) processor() {
 				p.flushBatch(batch)
 				batch = batch[:0]
 			}
-			timer.Reset(time.Duration(p.config.BatchTimeout) * time.Second)
+			timer.Reset(time.Duration(p.BatchTimeout) * time.Second)
 		}
 	}
 }
 
 // 恢复监控：尝试读取磁盘中的异常数据进行导出
 func (p *Pipeline) recoveryMonitor() {
-	ticker := time.NewTicker(time.Duration(p.config.RecoveryInterval) * time.Second)
+	ticker := time.NewTicker(time.Duration(p.RecoveryInterval) * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -156,7 +157,7 @@ func (p *Pipeline) recoveryMonitor() {
 				p.tryRecoverFromDisk()
 			case StatusBlocked:
 				if !p.localStore.isDiskFull() {
-					if err := p.localStore.Save(p.config.Name, p.blockData); err != nil {
+					if err := p.localStore.Save(p.Name, p.blockData); err != nil {
 						continue
 					}
 					p.blockData = p.blockData[:0]
@@ -267,11 +268,11 @@ func (p *Pipeline) flushBatch(batch []interface{}) {
 	}
 	wg.Wait()
 
-	p.metrics.SuccessCounter.WithLabelValues(p.config.Name).Inc()
+	p.metrics.SuccessCounter.WithLabelValues(p.Name).Inc()
 }
 
 func (p *Pipeline) handleExportError(name string, batch []interface{}) {
-	p.metrics.ErrorCounter.WithLabelValues(p.config.Name).Add(float64(len(batch)))
+	p.metrics.ErrorCounter.WithLabelValues(p.Name).Add(float64(len(batch)))
 
 	// 尝试本地存储
 	if saveErr := p.localStore.Save(name, batch); saveErr != nil {
@@ -298,6 +299,6 @@ func (p *Pipeline) Close() error {
 	p.cancel()
 	close(p.queue)
 	p.wg.Wait()
-	logx.Infof("===========================pipeline %s closed===========================", p.config.Name)
+	logx.Infof("===========================pipeline %s closed===========================", p.Name)
 	return p.localStore.Close()
 }

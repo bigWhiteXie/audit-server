@@ -2,6 +2,8 @@ package auditlog
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	"codexie.com/auditlog/internal/svc"
 	"codexie.com/auditlog/internal/types"
@@ -24,7 +26,22 @@ func NewReportLogLogic(ctx context.Context, svcCtx *svc.ServiceContext) *ReportL
 }
 
 func (l *ReportLogLogic) ReportLog(req *types.AuditLog) (resp *types.BaseResponse, err error) {
-	// todo: add your logic here and delete this line
+	auditLog := req.ToAuditLog()
 
-	return
+	for _, p := range l.svcCtx.Piplines {
+		if strings.ToLower(p.Name) == auditLog.Name() {
+			if err := p.Push(auditLog); err != nil {
+				// todo 返回预定义异常
+				logx.Errorf("failed to push audit log to pipeline: %v", err)
+				return nil, err
+			}
+			return &types.BaseResponse{
+				Code:    200,
+				Message: "success",
+			}, nil
+		}
+	}
+
+	// todo 返回预定义异常
+	return nil, errors.New("pipeline not found")
 }
