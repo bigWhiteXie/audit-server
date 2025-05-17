@@ -149,7 +149,9 @@ func (s *Scheduler) runTask(task Task) {
 func (s *Scheduler) onFailure(taskEntry *ScheduleTask, err error) {
 	s.circuitBreaker.OnFailure(taskEntry.TaskName)
 	taskEntry.FailureCount++
-	logx.Errorf("task run failed, taskId: %s, err: %v", taskEntry.TaskName, err)
+	if s.circuitBreaker.IsIsolated(taskEntry.TaskName) {
+		s.lock.Unlock(context.TODO(), taskEntry.TaskName)
+	}
 }
 
 func (s *Scheduler) onSuccess(taskEntry *ScheduleTask) {

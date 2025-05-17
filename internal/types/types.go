@@ -17,8 +17,9 @@ type AuditLog struct {
 }
 
 type BaseResponse struct {
-	Code    int    `json:"code"`
+	Code    string `json:"code"`
 	Message string `json:"message"`
+	Data    any    `json:"data"`
 }
 
 type ExportRequest struct {
@@ -58,9 +59,18 @@ type QueryRequest struct {
 	EndTime      int64  `form:"end_time,optional"`      // 结束时间戳（毫秒）
 	Page         int    `form:"page,default=1"`         // 分页页码，默认1
 	PageSize     int    `form:"page_size,default=20"`   // 每页大小，默认20
+	SortField    string `form:"sort_field,optional"`    // 排序字段，默认created_at
+	SortOrder    string `form:"sort_order,optional"`    // 排序方向，默认desc
 }
 
 type QueryResponse struct {
 	Total int        `json:"total"` // 总记录数
 	List  []AuditLog `json:"list"`  // 日志列表
+}
+
+type User struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Roles    []string `json:"roles"`
+	TenantID string `json:"tenant_id"`
 }

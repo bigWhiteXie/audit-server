@@ -36,7 +36,7 @@ func (l *ReportLogLogic) ReportLog(req *types.AuditLog) (resp *types.BaseRespons
 				return nil, err
 			}
 			return &types.BaseResponse{
-				Code:    200,
+				Code:    "200",
 				Message: "success",
 			}, nil
 		}

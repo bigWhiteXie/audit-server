@@ -10,6 +10,7 @@ import (
 
 	"github.com/zeromicro/go-zero/core/conf"
 	"github.com/zeromicro/go-zero/rest"
+	"github.com/zeromicro/go-zero/rest/httpx"
 )
 
 var configFile = flag.String("f", "etc/auditlog-api.yaml", "the config file")
@@ -33,7 +34,7 @@ func main() {
 
 	// =============启动任务调度=============
 	go ctx.Scheduler.Start()
-
+	httpx.SetErrorHandlerCtx(handler.ApiErrorHandler)
 	fmt.Printf("Starting server at %s:%d...\n", c.Host, c.Port)
 	server.Start()
 }

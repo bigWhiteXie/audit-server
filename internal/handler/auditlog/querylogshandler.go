@@ -17,6 +17,11 @@ func QueryLogsHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 			return
 		}
 
+		if err := req.Validate(r.Context()); err != nil {
+			httpx.ErrorCtx(r.Context(), w, err)
+			return
+		}
+
 		l := auditlog.NewQueryLogsLogic(r.Context(), svcCtx)
 		resp, err := l.QueryLogs(&req)
 		if err != nil {

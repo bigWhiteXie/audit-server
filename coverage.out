@@ -1,0 +1,15 @@
+mode: set
+codexie.com/auditlog/pkg/apierr/error.go:9.66,12.27 2 1
+codexie.com/auditlog/pkg/apierr/error.go:12.27,13.33 1 1
+codexie.com/auditlog/pkg/apierr/error.go:13.33,15.9 2 1
+codexie.com/auditlog/pkg/apierr/error.go:19.2,23.3 1 1
+codexie.com/auditlog/pkg/apierr/error.go:26.76,30.2 3 1
+codexie.com/auditlog/pkg/apierr/error.go:38.36,40.2 1 1
+codexie.com/auditlog/pkg/apierr/error.go:42.39,45.57 2 1
+codexie.com/auditlog/pkg/apierr/error.go:45.57,46.42 1 1
+codexie.com/auditlog/pkg/apierr/error.go:46.42,48.4 1 1
+codexie.com/auditlog/pkg/apierr/error.go:51.2,51.18 1 1
+codexie.com/auditlog/pkg/apierr/error.go:51.18,53.3 1 1
+codexie.com/auditlog/pkg/apierr/error.go:55.2,55.24 1 1
+codexie.com/auditlog/pkg/apierr/error.go:58.36,60.2 1 1
+codexie.com/auditlog/pkg/apierr/error.go:62.51,68.2 1 1
