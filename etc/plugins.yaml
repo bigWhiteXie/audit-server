@@ -1,0 +1,12 @@
+exporters:
+  - name: console
+    config: {}
+filters:
+  - name: field-filter
+    config:
+      allowedFields:
+        - field1
+        - field2
+lifecycles:
+  - name: noop-lifecycle
+    config: {}

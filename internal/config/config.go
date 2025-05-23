@@ -8,4 +8,6 @@ type Config struct {
 	MySQLConf MySQLConf
 	// RedisConf RedisConf
 	// KafkaConf KafkaConf
+
+	Plugins PluginsConfig `yaml:"plugins" json:"plugins"`
 }

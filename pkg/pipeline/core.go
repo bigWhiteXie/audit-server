@@ -35,7 +35,7 @@ type Pipeline[T any] struct {
 	config  Config
 	queue   chan T
 	plugins struct {
-		exporter   []plugins.Exporter[T]
+		exporter   map[string]plugins.Exporter[T]
 		filters    []plugins.Filter[T]
 		lifecycles []plugins.LifecycleHook[T]
 	}
@@ -48,12 +48,10 @@ type Pipeline[T any] struct {
 }
 
 type Config struct {
-	Name          string
-	BatchSize     int
-	BatchTimeout  time.Duration
-	QueueSize     int
-	StorageDir    string
-	MetricsPrefix string
+	Name         string
+	BatchSize    int
+	BatchTimeout time.Duration
+	StorageDir   string
 }
 
 func New[T any](cfg Config) *Pipeline[T] {
@@ -61,17 +59,17 @@ func New[T any](cfg Config) *Pipeline[T] {
 
 	p := &Pipeline[T]{
 		config: cfg,
-		queue:  make(chan T, cfg.QueueSize),
+		queue:  make(chan T, cfg.BatchSize),
 		state:  NewState(),
 		ctx:    ctx,
 		cancel: cancel,
 	}
 
 	// 初始化本地存储
-	p.localStore = NewLocalStorage[T](cfg.StorageDir)
+	p.localStore = NewLocalStorage[T](cfg.StorageDir, cfg.BatchSize)
 
 	// 初始化指标
-	p.metrics = NewMetrics(cfg.MetricsPrefix)
+	p.metrics = NewMetrics(cfg.Name)
 
 	// 注册默认生命周期钩子
 	p.RegisterLifecycleHook(&NoopLifecycleHook[T]{})
@@ -82,6 +80,8 @@ func New[T any](cfg Config) *Pipeline[T] {
 		defer p.wg.Done()
 		p.processor()
 	}()
+
+	// 启动故障恢复，检测目录中文件是否有残留日志，有的话尝试导出
 
 	return p
 }
@@ -134,11 +134,6 @@ func (p *Pipeline[T]) processor() {
 }
 
 func (p *Pipeline[T]) flushBatch(batch []T) {
-	if len(p.plugins.exporter) == 0 {
-		p.handleError(ErrPluginNotRegistered, batch)
-		return
-	}
-
 	ctx := context.Background()
 
 	// 执行前置钩子
@@ -170,7 +165,11 @@ func (p *Pipeline[T]) flushBatch(batch []T) {
 			defer wg.Done()
 			start := time.Now()
 			if err := exporter.Export(ctx, processed); err != nil {
-				p.handleError(ErrExporterFailed, batch)
+				p.handleExportError(exporter.Name(), batch)
+				// 执行错误钩子
+				for _, hook := range p.plugins.lifecycles {
+					hook.OnError(context.Background(), err, batch)
+				}
 				return
 			}
 			p.metrics.ExportLatency.WithLabelValues(exporter.Name()).Observe(float64(time.Since(start).Milliseconds()))
@@ -181,20 +180,16 @@ func (p *Pipeline[T]) flushBatch(batch []T) {
 	p.metrics.SuccessCounter.WithLabelValues(p.config.Name).Inc()
 }
 
-func (p *Pipeline[T]) handleError(err error, batch []T) {
+func (p *Pipeline[T]) handleExportError(name string, batch []T) {
 	p.metrics.ErrorCounter.WithLabelValues(p.config.Name).Inc()
 	p.state.EnterRecovering()
 	// 尝试本地存储
-	if saveErr := p.localStore.Save(batch); saveErr != nil {
+	if saveErr := p.localStore.Save(name, batch); saveErr != nil {
 		if saveErr == ErrDiskFull {
 			p.state.EnterBlocked()
 		}
 	}
 
-	// 执行错误钩子
-	for _, hook := range p.plugins.lifecycles {
-		hook.OnError(context.Background(), err, batch)
-	}
 }
 
 // 关闭管道，等待所有数据处理完成

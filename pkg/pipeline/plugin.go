@@ -8,7 +8,7 @@ import (
 
 // 插件注册方法
 func (p *Pipeline[T]) RegisterExporter(exporter plugins.Exporter[T]) {
-	p.plugins.exporter = append(p.plugins.exporter, exporter)
+	p.plugins.exporter[exporter.Name()] = exporter
 }
 
 func (p *Pipeline[T]) RegisterFilter(filter plugins.Filter[T]) {

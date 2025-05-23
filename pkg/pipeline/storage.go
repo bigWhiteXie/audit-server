@@ -9,33 +9,39 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 const (
-	maxFileSize  = 10 * 1024 * 1024  // 10MB
-	minDiskSpace = 100 * 1024 * 1024 // 100MB
-	batchSize    = 100               // 每批恢复的数据量
+	maxFileSize    = 100 * 1024 * 1024 // 10MB
+	minDiskSpace   = 100 * 1024 * 1024 // 100MB
+	batchSize      = 100               // 每批恢复的数据量
+	maxBufferLimit = 10 * 1024 * 1024  // 10MB
 )
+
+type ExportErrData[T any] struct {
+	Name string `json:"name"`
+	Data *T     `json:"data"`
+}
 
 // LocalStorage 本地存储，支持泛型
 type LocalStorage[T any] struct {
 	mu          sync.Mutex
 	storageDir  string
+	batchSize   int
 	currentFile *os.File
 	currentSize int64
 }
 
 // NewLocalStorage 创建新的本地存储
-func NewLocalStorage[T any](storageDir string) *LocalStorage[T] {
+func NewLocalStorage[T any](storageDir string, batchSize int) *LocalStorage[T] {
 	return &LocalStorage[T]{
 		storageDir: storageDir,
+		batchSize:  batchSize,
 	}
 }
 
 // Save 保存数据到本地文件
-func (s *LocalStorage[T]) Save(batch []T) error {
+func (s *LocalStorage[T]) Save(name string, batch []T) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -50,8 +56,16 @@ func (s *LocalStorage[T]) Save(batch []T) error {
 		}
 	}
 
+	errData := make([]ExportErrData[T], len(batch))
+	for i, data := range batch {
+		errData[i] = ExportErrData[T]{
+			Name: name,
+			Data: &data,
+		}
+	}
+
 	// 序列化数据并写入
-	data, err := json.Marshal(batch)
+	data, err := json.Marshal(errData)
 	if err != nil {
 		return err
 	}
@@ -71,8 +85,8 @@ func (s *LocalStorage[T]) Save(batch []T) error {
 }
 
 // Recover 从本地文件恢复数据，通过channel异步返回
-func (s *LocalStorage[T]) Recover() (<-chan []T, error) {
-	dataCh := make(chan []T)
+func (s *LocalStorage[T]) Recover() (<-chan []ExportErrData[T], error) {
+	dataCh := make(chan []ExportErrData[T])
 	errCh := make(chan error, 1)
 
 	defer close(dataCh)
@@ -102,7 +116,7 @@ func (s *LocalStorage[T]) Recover() (<-chan []T, error) {
 }
 
 // recoverFile 从单个文件恢复数据
-func (s *LocalStorage[T]) recoverFile(filePath string, dataCh chan<- []T) error {
+func (s *LocalStorage[T]) recoverFile(filePath string, dataCh chan<- []ExportErrData[T]) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return err
@@ -111,7 +125,10 @@ func (s *LocalStorage[T]) recoverFile(filePath string, dataCh chan<- []T) error 
 
 	scanner := bufio.NewScanner(file)
 	// 增加缓冲区大小，处理大行
-	const maxCapacity = 10 * 1024 * 1024 // 10MB
+	maxCapacity := s.batchSize * 1024
+	if maxCapacity > maxBufferLimit {
+		maxCapacity = maxBufferLimit
+	}
 	buf := make([]byte, maxCapacity)
 	scanner.Buffer(buf, maxCapacity)
 
@@ -121,7 +138,7 @@ func (s *LocalStorage[T]) recoverFile(filePath string, dataCh chan<- []T) error 
 			continue
 		}
 
-		var batch []T
+		var batch []ExportErrData[T]
 		if err := json.Unmarshal(line, &batch); err != nil {
 			return fmt.Errorf("failed to unmarshal data: %w", err)
 		}
@@ -157,19 +174,6 @@ func (s *LocalStorage[T]) rotateFile() error {
 	s.currentFile = f
 	s.currentSize = 0
 	return nil
-}
-
-func (s *LocalStorage[T]) isDiskFull() bool {
-	var stat unix.Statfs_t
-	err := unix.Statfs(s.storageDir, &stat)
-	if err != nil {
-		// 如果无法获取磁盘信息，保守起见认为磁盘已满
-		return true
-	}
-
-	// 计算可用空间
-	available := stat.Bavail * uint64(stat.Bsize)
-	return available < minDiskSpace
 }
 
 // Close 关闭存储
