@@ -31,6 +31,9 @@ func main() {
 		p.Start()
 	}
 
+	// =============启动任务调度=============
+	go ctx.Scheduler.Start()
+
 	fmt.Printf("Starting server at %s:%d...\n", c.Host, c.Port)
 	server.Start()
 }

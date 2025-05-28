@@ -23,10 +23,11 @@ func NewTimeWheel(slotCount int, interval time.Duration, taskQueue *TaskQueue) *
 	for i := range tw.slots {
 		tw.slots[i] = make(map[string]Task)
 	}
-	go tw.Advance()
+
 	return tw
 }
 
+// 添加任务，任务会根据下次执行时间来分配到对应槽位
 func (tw *TimeWheel) AddTask(task Task) {
 	now := time.Now()
 	nextTime := task.NextRunTime()
@@ -44,21 +45,27 @@ func (tw *TimeWheel) AddTask(task Task) {
 	tw.slots[targetSlot][task.Name()] = task
 }
 
-func (tw *TimeWheel) Advance() {
-	for range tw.ticker.C {
-		tw.slotMutexes[tw.currentSlot].Lock()
-		currentTasks := tw.slots[tw.currentSlot]
-		tw.slots[tw.currentSlot] = make(map[string]Task) // 清空槽位
-		tw.slotMutexes[tw.currentSlot].Unlock()
+func (tw *TimeWheel) Run() {
+	go func() {
+		for range tw.ticker.C {
+			tw.slotMutexes[tw.currentSlot].Lock()
+			currentTasks := tw.slots[tw.currentSlot]
+			tw.slots[tw.currentSlot] = make(map[string]Task) // 清空槽位
+			tw.slotMutexes[tw.currentSlot].Unlock()
 
-		for _, task := range currentTasks {
-			if time.Now().After(task.NextRunTime()) {
-				tw.taskQueue.Push(task)
-			} else {
-				tw.AddTask(task)
+			for _, task := range currentTasks {
+				if time.Now().After(task.NextRunTime()) {
+					tw.taskQueue.Push(task)
+				} else {
+					tw.AddTask(task)
+				}
 			}
-		}
 
-		tw.currentSlot = (tw.currentSlot + 1) % len(tw.slots)
-	}
+			tw.currentSlot = (tw.currentSlot + 1) % len(tw.slots)
+		}
+	}()
+}
+
+func (tw *TimeWheel) Stop() {
+	tw.ticker.Stop()
 }

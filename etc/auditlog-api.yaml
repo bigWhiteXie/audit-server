@@ -34,4 +34,9 @@ Pipelines:
             redis: "#svc.Redis"
             db: "#svc.DB"
 
+Schedule:
+  FailThreshold: 3   # 连续3次失败则进入熔断
+  IsolateDuration: 30 # 熔断时间30秒
+  LeaseDuration: 15   # 锁的租约时间15秒
+
     

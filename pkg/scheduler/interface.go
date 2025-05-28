@@ -22,8 +22,8 @@ type Task interface {
 
 // DistributedLock 分布式锁接口，便于后续扩展不同存储实现（如Redis、DB等）
 type DistributedLock interface {
-	TryLock(ctx context.Context, key string, ttl time.Duration) (bool, error) // 尝试加锁，返回是否成功
-	Unlock(ctx context.Context, key string) error                             // 释放锁
-	Renew(ctx context.Context, key string, ttl time.Duration) error           // 续期锁
-	IsLocked(ctx context.Context, key string) (bool, error)                   // 判断锁是否存在
+	TryLock(ctx context.Context, key string) (bool, error) // 尝试加锁，返回是否成功
+	Unlock(ctx context.Context, key string) error          // 释放锁
+	AutoRenew()
+	ReleaseAll() // 启动分布式锁
 }

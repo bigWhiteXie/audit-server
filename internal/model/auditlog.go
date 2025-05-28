@@ -13,7 +13,7 @@ import (
 
 // 分表配置（每月一张表）
 const (
-	TablePrefix = "audit_log"
+	AuditLogName = "audit_log"
 )
 
 // 审计日志实体（对应分表结构 audit_log_YYYYMM）
@@ -41,13 +41,13 @@ type AuditLog struct {
 func (log *AuditLog) TableName() string {
 	tableSuffix := strings.Split(log.LogId, "_")
 	if len(tableSuffix) > 1 {
-		return fmt.Sprintf("%s_%s", TablePrefix, tableSuffix[1])
+		return fmt.Sprintf("%s_%s", AuditLogName, tableSuffix[1])
 	}
-	return TablePrefix
+	return AuditLogName
 }
 
 func (log *AuditLog) Name() string {
-	return TablePrefix
+	return AuditLogName
 }
 
 func (log *AuditLog) SetId(id string) {

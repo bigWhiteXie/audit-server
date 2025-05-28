@@ -10,9 +10,9 @@ import (
 )
 
 type ScheduleConfig struct {
-	FailThreshold   int // 失败阈值，达到后开启熔断
-	IsolateDuration int // 熔断时间，单位秒
-	LeaseDuration   int // 锁租期，单位秒
+	FailThreshold   int `json:"" yaml:"FailThreshold"`   // 失败阈值，达到后开启熔断
+	IsolateDuration int `json:"" yaml:"IsolateDuration"` // 熔断时间，单位秒
+	LeaseDuration   int `json:"" yaml:"LeaseDuration"`   // 锁租期，单位秒
 }
 
 type Scheduler struct {
@@ -21,18 +21,19 @@ type Scheduler struct {
 	db             *gorm.DB
 	taskQueue      *TaskQueue
 	timeWheel      *TimeWheel
+	cancelFunc     context.CancelFunc
 	lock           DistributedLock
 	circuitBreaker CircuitBreaker
 }
 
-func NewScheduler(db *gorm.DB, lock DistributedLock, config ScheduleConfig) *Scheduler {
+func NewScheduler(db *gorm.DB, config ScheduleConfig) *Scheduler {
 	taskQueue := NewTaskQueue()
 
 	return &Scheduler{
 		db:             db,
 		taskQueue:      taskQueue,
 		timeWheel:      NewTimeWheel(100, time.Millisecond*100, taskQueue),
-		lock:           lock,
+		lock:           NewMySQLLock(db, time.Duration(config.LeaseDuration)*time.Second),
 		circuitBreaker: *NewCircuitBreaker(config.FailThreshold, time.Duration(config.IsolateDuration)*time.Second),
 	}
 }
@@ -60,7 +61,12 @@ func (s *Scheduler) RegisterTask(task Task) {
 	s.timeWheel.AddTask(task)
 }
 
-func (s *Scheduler) Start(ctx context.Context) {
+func (s *Scheduler) Start() {
+	ctx, cancelFunc := context.WithCancel(context.TODO())
+	s.cancelFunc = cancelFunc
+
+	s.timeWheel.Run()
+	s.lock.AutoRenew()
 	for {
 		select {
 		case <-ctx.Done():
@@ -68,43 +74,67 @@ func (s *Scheduler) Start(ctx context.Context) {
 			return
 		default:
 			task := s.taskQueue.Pop()
-			s.runTask(task)
+			// 尝试获取锁
+			if ok, err := s.lock.TryLock(ctx, task.Name()); !ok || err != nil {
+				logx.Info("=========================scheduler get lock failed=========================")
+				if err != nil {
+					logx.Error("get lock failed, err: %v", err)
+				}
+				task.SetNextRunTime(time.Now().Add(time.Duration(task.ExeInterval()) * time.Second))
+				s.timeWheel.AddTask(task)
+				continue
+			}
+
+			if s.circuitBreaker.IsIsolated(task.Name()) {
+				logx.Infof("task is isolated, taskId: %s", task.Name())
+				task.SetNextRunTime(time.Now().Add(time.Duration(task.ExeInterval()) * time.Second))
+				s.timeWheel.AddTask(task)
+				continue
+			}
+
+			go s.runTask(task)
 		}
 	}
 }
 
+func (s *Scheduler) Stop() {
+	// 停止执行任务的协程
+	s.cancelFunc()
+	// 释放所有分布式锁
+	s.lock.ReleaseAll()
+	// 停止时间轮
+	s.timeWheel.Stop()
+}
+
 func (s *Scheduler) runTask(task Task) {
 	taskEntry := &ScheduleTask{}
-	isRun := false
 	defer func() {
 		if err := recover(); err != nil {
 			logx.Error("task run failed, taskId: %s, err: %v", task.Name(), err)
 		}
+
 		task.SetNextRunTime(time.Now().Add(time.Duration(task.ExeInterval()) * time.Second))
 		s.timeWheel.AddTask(task)
-		if isRun {
-			if err := s.db.Model(taskEntry).Where("task_name = ?", task.Name()).Updates(taskEntry).Error; err != nil {
-				logx.Error("update taskEntry failed, taskName: %s, err: %v", task.Name(), err)
-			}
+
+		// 更新任务信息
+		if err := s.db.Model(taskEntry).Where("task_name = ?", task.Name()).Updates(taskEntry).Error; err != nil {
+			logx.Error("update taskEntry failed, taskName: %s, err: %v", task.Name(), err)
 		}
+		// todo: 根据负载情况判断是否需要释放锁
 	}()
 
-	if s.circuitBreaker.IsIsolated(task.Name()) {
-		logx.Infof("task is isolated, taskId: %s", task.Name())
-		return
-	}
-
 	// 查询任务信息
-	taskEntry.LastRunTime = time.Now()
 	if err := s.db.Model(taskEntry).Where("task_name = ?", task.Name()).First(taskEntry).Error; err != nil {
 		logx.Error("find taskEntry failed, taskName: %s", task.Name())
 		return
 	}
 
 	// 调整到下次执行时间
-	if time.Now().After(taskEntry.NextRunTime) {
+	if time.Now().Before(taskEntry.NextRunTime) {
 		time.Sleep(taskEntry.NextRunTime.Sub(time.Now()))
 	}
+
+	taskEntry.LastRunTime = time.Now()
 	if err := task.Run(); err != nil {
 		s.onFailure(taskEntry, err)
 		return
@@ -112,7 +142,6 @@ func (s *Scheduler) runTask(task Task) {
 
 	// 更新任务、熔断器状态等
 	s.onSuccess(taskEntry)
-
 }
 
 func (s *Scheduler) onFailure(taskEntry *ScheduleTask, err error) {

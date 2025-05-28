@@ -10,12 +10,14 @@ import (
 
 	"codexie.com/auditlog/internal/config"
 	"codexie.com/auditlog/internal/constant"
+	"codexie.com/auditlog/internal/job"
 	"codexie.com/auditlog/internal/model"
 	"codexie.com/auditlog/pkg/pipeline"
 	"codexie.com/auditlog/pkg/plugin"
 	_ "codexie.com/auditlog/pkg/plugin/exporter"
 	_ "codexie.com/auditlog/pkg/plugin/filter"
 	_ "codexie.com/auditlog/pkg/plugin/lifecycle"
+	"codexie.com/auditlog/pkg/scheduler"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/zeromicro/go-zero/core/logx"
@@ -30,10 +32,11 @@ const (
 )
 
 type ServiceContext struct {
-	Config   config.Config
-	DB       *gorm.DB
-	Piplines []*pipeline.Pipeline
-	Redis    *redis.Client
+	Config    config.Config
+	DB        *gorm.DB
+	Piplines  []*pipeline.Pipeline
+	Redis     *redis.Client
+	Scheduler *scheduler.Scheduler
 }
 
 func NewServiceContext(c config.Config) *ServiceContext {
@@ -46,6 +49,7 @@ func NewServiceContext(c config.Config) *ServiceContext {
 	ctx.initTables()
 
 	ctx.initPiplines(c.Pipelines)
+	ctx.initScheduler(c.Scheduler)
 
 	return ctx
 }
@@ -147,6 +151,12 @@ func (s *ServiceContext) InitRedis(redisConf config.RedisConf) {
 		panic("redis connect failed: " + err.Error())
 	}
 	s.Redis = myRedis
+}
+
+func (s *ServiceContext) initScheduler(conf scheduler.ScheduleConfig) {
+	s.Scheduler = scheduler.NewScheduler(s.DB, conf)
+	scheduleJob := job.NewScheduleJob(s.DB)
+	s.Scheduler.RegisterTask(scheduleJob)
 }
 
 func (s *ServiceContext) initTables() {
