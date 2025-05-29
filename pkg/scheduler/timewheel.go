@@ -13,7 +13,8 @@ type TimeWheel struct {
 	slotMutexes []sync.Mutex
 }
 
-func NewTimeWheel(slotCount int, interval time.Duration, taskQueue *TaskQueue) *TimeWheel {
+func NewTimeWheel(interval time.Duration, taskQueue *TaskQueue) *TimeWheel {
+	slotCount := int(500 / interval.Milliseconds())
 	tw := &TimeWheel{
 		ticker:      time.NewTicker(interval),
 		taskQueue:   taskQueue,

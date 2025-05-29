@@ -21,7 +21,7 @@ func (m *mockTask) Run() error                 { *m.runCalled = true; return nil
 
 func TestTimeWheel_AddTaskAndRun(t *testing.T) {
 	queue := NewTaskQueue()
-	tw := NewTimeWheel(10, time.Millisecond*50, queue)
+	tw := NewTimeWheel(time.Millisecond*50, queue)
 	runCalled := false
 	task := &mockTask{
 		name:        "test",
@@ -42,7 +42,7 @@ func TestTimeWheel_AddTaskAndRun(t *testing.T) {
 
 func TestTimeWheel_Stop(t *testing.T) {
 	queue := NewTaskQueue()
-	tw := NewTimeWheel(5, time.Millisecond*20, queue)
+	tw := NewTimeWheel(time.Millisecond*20, queue)
 	tw.Run()
 	tw.Stop()
 	// 多次Stop应无panic

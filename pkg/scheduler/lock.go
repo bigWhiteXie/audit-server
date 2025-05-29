@@ -143,12 +143,14 @@ func (l *MySQLLock) renewLocks() {
 				res := l.db.Model(&ScheduleTask{}).Where("task_name =? AND lease_holder =? AND lease_until >?", taskName, l.instanceName, now).Update("lease_until", leaseTime)
 				if res.Error != nil {
 					logx.Errorf("fail to renew task lock,cause:%s", res.Error)
+					l.lockMap.Delete(taskName)
 					return
 				}
 				if res.RowsAffected == 0 {
 					logx.Errorf("lock of %s already released", taskName)
 					l.lockMap.Delete(taskName)
 				}
+				l.lockMap.Store(taskName, now)
 			}(taskName)
 		}
 		return true

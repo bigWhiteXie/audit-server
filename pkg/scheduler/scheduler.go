@@ -32,7 +32,7 @@ func NewScheduler(db *gorm.DB, config ScheduleConfig) *Scheduler {
 	return &Scheduler{
 		db:             db,
 		taskQueue:      taskQueue,
-		timeWheel:      NewTimeWheel(100, time.Millisecond*100, taskQueue),
+		timeWheel:      NewTimeWheel(time.Millisecond*50, taskQueue),
 		lock:           NewMySQLLock(db, time.Duration(config.LeaseDuration)*time.Second),
 		circuitBreaker: *NewCircuitBreaker(config.FailThreshold, time.Duration(config.IsolateDuration)*time.Second),
 	}
