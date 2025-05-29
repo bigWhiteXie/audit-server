@@ -16,6 +16,7 @@ type TimeWheel struct {
 func NewTimeWheel(slotCount int, interval time.Duration, taskQueue *TaskQueue) *TimeWheel {
 	tw := &TimeWheel{
 		ticker:      time.NewTicker(interval),
+		taskQueue:   taskQueue,
 		slots:       make([]map[string]Task, slotCount),
 		slotMutexes: make([]sync.Mutex, slotCount),
 		currentSlot: 0,
@@ -36,8 +37,8 @@ func (tw *TimeWheel) AddTask(task Task) {
 	}
 
 	duration := nextTime.Sub(now)
-	slots := int(duration / (100 * time.Millisecond))
-	targetSlot := (tw.currentSlot + slots) % len(tw.slots)
+	spanSlots := int(duration / (100 * time.Millisecond))
+	targetSlot := (tw.currentSlot + spanSlots + 1) % len(tw.slots)
 
 	tw.slotMutexes[targetSlot].Lock()
 	defer tw.slotMutexes[targetSlot].Unlock()

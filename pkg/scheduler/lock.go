@@ -2,10 +2,11 @@ package scheduler
 
 import (
 	"context"
-	"os"
 	"sync"
 	"time"
 
+	"codexie.com/auditlog/pkg/util"
+	"github.com/google/uuid"
 	"github.com/zeromicro/go-zero/core/logx"
 	"gorm.io/gorm"
 )
@@ -26,16 +27,17 @@ type MySQLLock struct {
 }
 
 func NewMySQLLock(db *gorm.DB, leaseDuration time.Duration) *MySQLLock {
-	hostName, err := os.Hostname()
+	ip, err := util.GetLocalIP()
 	if err != nil {
-		logx.Errorf("fail to get hostname,cause:%s", err)
 		panic(err)
 	}
+	instanceName := ip + "-" + uuid.New().String()[:12]
+
 	lock := &MySQLLock{
 		db:            db,
 		leaseDuration: leaseDuration,
 		lockMap:       sync.Map{},
-		instanceName:  hostName,
+		instanceName:  instanceName,
 	}
 
 	return lock
@@ -68,6 +70,7 @@ func (l *MySQLLock) TryLock(ctx context.Context, taskName string) (bool, error) 
 	}
 	if res.RowsAffected == 0 {
 		logx.Debugf("fail to get task lock,taskName:%s", taskName)
+		l.lockMap.Delete(taskName)
 		return false, nil
 	}
 

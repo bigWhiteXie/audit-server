@@ -15,7 +15,7 @@ var TaskPosNsp SchedulePos
 // SchedulePos taskPos
 type SchedulePos struct {
 	Id               uint64    `gorm:"column:id;primary_key;auto_increment"`
-	Name             string    `gorm:"column:name;unique"`
+	Name             string    `gorm:"column:name;uniqueIndex:idx_name;type:varchar(155)"`
 	ScheduleBeginPos int       `gorm:"column:schedule_begin_pos;not null"`
 	ScheduleEndPos   int       `gorm:"column:schedule_end_pos;not null"`
 	CreateTime       time.Time `gorm:"column:create_time;not null;autoCreateTime"`

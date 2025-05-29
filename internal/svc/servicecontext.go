@@ -23,6 +23,7 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -52,6 +53,14 @@ func NewServiceContext(c config.Config) *ServiceContext {
 	ctx.initScheduler(c.Scheduler)
 
 	return ctx
+}
+
+func (s *ServiceContext) ReleaseAll() {
+	for _, p := range s.Piplines {
+		p.Close()
+	}
+
+	s.Scheduler.Stop()
 }
 
 // 设置数据库
@@ -164,19 +173,34 @@ func (s *ServiceContext) initTables() {
 		&model.AuditLog{},
 	}
 	s.genTables(entities)
-
-	go checkTableJob(s.DB, entities)
 }
 
 func (s *ServiceContext) genTables(entities []model.Entity) {
 	schedulePos := &model.SchedulePos{}
+	s.DB.AutoMigrate(schedulePos)
+	s.DB.AutoMigrate(&scheduler.ScheduleTask{})
+
+	//创建实体对象表
 	for _, entity := range entities {
 		pos, err := schedulePos.GetSchedulePos(s.DB, entity.Name())
-		if err != nil {
+		if err != nil && err != gorm.ErrRecordNotFound {
 			panic(err)
 		}
+		if err == gorm.ErrRecordNotFound {
+			pos = &model.SchedulePos{
+				Name:             entity.Name(),
+				ScheduleBeginPos: 1,
+				ScheduleEndPos:   1,
+			}
+			if err := s.DB.Model(pos).Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "name"}},
+				DoNothing: true,
+			}).Create(pos).Error; err != nil {
+				panic(err)
+			}
+		}
 		s.Redis.Set(context.Background(), fmt.Sprintf("%s:%s", constant.SchedulePosKey, entity.Name()), pos.ScheduleEndPos, 0)
-		s.DB.Table(fmt.Sprintf("%s_%d", entity.Name(), pos.Id)).AutoMigrate(pos, entity)
+		s.DB.Table(fmt.Sprintf("%s_%d", entity.Name(), pos.ScheduleEndPos)).AutoMigrate(entity)
 	}
 }
 
@@ -190,64 +214,4 @@ func (s *ServiceContext) getFieldVal(fieldName string) any {
 
 	logx.Errorf("ServiceContext字段不存在: %s", fieldName)
 	return nil
-}
-
-func checkTableJob(db *gorm.DB, entities []model.Entity) {
-	checkSizeTicker := time.NewTicker(checkInterval)
-	delLogTicker := time.NewTicker(delLogInterval)
-	defer checkSizeTicker.Stop()
-	defer delLogTicker.Stop()
-
-	for {
-		select {
-		case <-checkSizeTicker.C:
-			for _, entity := range entities {
-				checkTableSize(db, entity)
-			}
-		case <-delLogTicker.C:
-			for _, entity := range entities {
-				delLogs(db, entity)
-			}
-		}
-	}
-}
-
-func checkTableSize(db *gorm.DB, entity model.Entity) {
-	// todo: 加分布式锁
-	schedulePos := &model.SchedulePos{}
-	// 获取当前表位置
-	pos, err := schedulePos.GetSchedulePos(db, entity.Name())
-	if err != nil {
-		logx.Error("获取表位置失败", "entity", entity.Name(), "error", err)
-		return
-	}
-
-	curTable := fmt.Sprintf("%s_%d", entity.Name(), pos.ScheduleEndPos)
-	var count int64
-	err = db.Raw("SELECT COUNT(*) FROM " + curTable).Scan(&count).Error
-	if err != nil {
-		logx.Error("获取表行数失败", "entity", entity.Name(), "error", err)
-		return
-	}
-
-	// 如果当前表行数超过300万，则创建新的表
-	if count > maxRowsPerTable {
-		pos.ScheduleEndPos++
-		newTableName := fmt.Sprintf("%s_%d", entity.Name(), pos.ScheduleEndPos)
-		db.Table(newTableName).AutoMigrate(entity)
-		pos.Save(db, pos)
-	}
-}
-
-func delLogs(db *gorm.DB, entity model.Entity) {
-	pos := &model.SchedulePos{}
-	pos.GetSchedulePos(db, entity.Name())
-	//从pos.ScheduleBeginPos到pos.ScheduleEndPos中查询是否有超过6个月的日志记录
-	for i := pos.ScheduleBeginPos; i <= pos.ScheduleEndPos; i++ {
-		tableName := fmt.Sprintf("%s_%d", entity.Name(), i)
-		res := db.Table(tableName).Where("created_at < ?", time.Now().AddDate(0, -6, 0)).Delete(&entity)
-		if res.RowsAffected == 0 {
-			break
-		}
-	}
 }

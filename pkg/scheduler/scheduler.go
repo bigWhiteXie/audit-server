@@ -41,8 +41,9 @@ func NewScheduler(db *gorm.DB, config ScheduleConfig) *Scheduler {
 func (s *Scheduler) RegisterTask(task Task) {
 	// 先查询数据库中是否存在该任务，若存在则直接读取
 	taskEntry := &ScheduleTask{}
-	if err := s.db.Model(taskEntry).Where("task_name = ?", task.Name()).First(task.Name()).Error; err != nil {
+	if err := s.db.Model(taskEntry).Where("task_name = ?", task.Name()).First(taskEntry).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
+			taskEntry.TaskName = task.Name()
 			taskEntry.NextRunTime = time.Now().Add(time.Duration(task.ExeInterval()) * time.Second)
 			taskEntry.Priority = task.Priority()
 
@@ -78,7 +79,7 @@ func (s *Scheduler) Start() {
 			if ok, err := s.lock.TryLock(ctx, task.Name()); !ok || err != nil {
 				logx.Info("=========================scheduler get lock failed=========================")
 				if err != nil {
-					logx.Error("get lock failed, err: %v", err)
+					logx.Errorf("get lock failed, err: %v", err)
 				}
 				task.SetNextRunTime(time.Now().Add(time.Duration(task.ExeInterval()) * time.Second))
 				s.timeWheel.AddTask(task)
@@ -110,22 +111,23 @@ func (s *Scheduler) runTask(task Task) {
 	taskEntry := &ScheduleTask{}
 	defer func() {
 		if err := recover(); err != nil {
-			logx.Error("task run failed, taskId: %s, err: %v", task.Name(), err)
+			logx.Errorf("task run failed, taskId: %s, err: %v", task.Name(), err)
 		}
 
-		task.SetNextRunTime(time.Now().Add(time.Duration(task.ExeInterval()) * time.Second))
+		nextTime := time.Now().Add(time.Duration(task.ExeInterval()) * time.Second)
+		task.SetNextRunTime(nextTime)
+		taskEntry.NextRunTime = nextTime
+
+		// 更新任务信息并重新到时间轮
 		s.timeWheel.AddTask(task)
-
-		// 更新任务信息
 		if err := s.db.Model(taskEntry).Where("task_name = ?", task.Name()).Updates(taskEntry).Error; err != nil {
-			logx.Error("update taskEntry failed, taskName: %s, err: %v", task.Name(), err)
+			logx.Errorf("update taskEntry failed, taskName: %s, err: %v", task.Name(), err)
 		}
-		// todo: 根据负载情况判断是否需要释放锁
 	}()
 
 	// 查询任务信息
 	if err := s.db.Model(taskEntry).Where("task_name = ?", task.Name()).First(taskEntry).Error; err != nil {
-		logx.Error("find taskEntry failed, taskName: %s", task.Name())
+		logx.Errorf("find taskEntry failed, taskName: %s", task.Name())
 		return
 	}
 
@@ -147,7 +149,7 @@ func (s *Scheduler) runTask(task Task) {
 func (s *Scheduler) onFailure(taskEntry *ScheduleTask, err error) {
 	s.circuitBreaker.OnFailure(taskEntry.TaskName)
 	taskEntry.FailureCount++
-	logx.Error("task run failed, taskId: %s, err: %v", taskEntry.TaskName, err)
+	logx.Errorf("task run failed, taskId: %s, err: %v", taskEntry.TaskName, err)
 }
 
 func (s *Scheduler) onSuccess(taskEntry *ScheduleTask) {

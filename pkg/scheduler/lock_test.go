@@ -8,13 +8,14 @@ import (
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func setupTestDB(t *testing.T) *gorm.DB {
 	datasource := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=%t&loc=%s",
 		"root",
-		"j3391111",
-		"192.168.126.100",
+		"123456",
+		"10.131.139.155",
 		3306,
 		"audit_log",
 		"utf8",
@@ -24,14 +25,33 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("failed to connect database: %v", err)
 	}
-	db.AutoMigrate(&ScheduleTask{})
+	taskEntry := &ScheduleTask{}
+	db.Exec("drop table if exists " + taskEntry.TableName())
+	if err := db.AutoMigrate(&ScheduleTask{}); err != nil {
+		t.Fatalf("auto migrate failed: %v", err)
+	}
+	taskEntry.TaskName = "test_task"
+	taskEntry.NextRunTime = time.Now().Add(time.Duration(10) * time.Second)
+	taskEntry.Priority = 1
+
+	if err := db.Model(taskEntry).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "task_name"}},
+		DoNothing: true,
+	}).Create(taskEntry).Error; err != nil {
+		panic(err)
+	}
 	return db
 }
 
 func TestMySQLLock_TryLockAndUnlock(t *testing.T) {
 	db := setupTestDB(t)
-	lock := NewMySQLLock(db, time.Second)
+	lock := NewMySQLLock(db, 15*time.Second)
 	taskName := "test_task"
+
+	taskEntry := &ScheduleTask{}
+	taskEntry.TaskName = taskName
+	taskEntry.NextRunTime = time.Now().Add(time.Duration(10) * time.Second)
+	taskEntry.Priority = 1
 
 	ok, err := lock.TryLock(context.Background(), taskName)
 	if err != nil || !ok {
@@ -51,7 +71,15 @@ func TestMySQLLock_TryLockAndUnlock(t *testing.T) {
 
 func TestMySQLLock_AutoRenew(t *testing.T) {
 	db := setupTestDB(t)
-	lock := NewMySQLLock(db, time.Millisecond*100)
+	db.Model(&ScheduleTask{}).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "task_name"}},
+		DoNothing: true,
+	}).Create(&ScheduleTask{
+		TaskName:    "renew_task",
+		NextRunTime: time.Now().Add(time.Duration(10) * time.Second),
+		Priority:    1,
+	})
+	lock := NewMySQLLock(db, time.Millisecond*150)
 	taskName := "renew_task"
 	ok, err := lock.TryLock(context.Background(), taskName)
 	if err != nil || !ok {
